@@ -1,0 +1,56 @@
+name: AI Development Task
+description: Create a task for AI agent to implement
+labels: ["ai-task"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This issue will be automatically picked up by the AI agent when the `ai-task` label is applied.
+  - type: textarea
+    id: description
+    attributes:
+      label: Task Description
+      description: Clearly describe what needs to be implemented or fixed.
+      placeholder: "Implement audio recording module using cpal crate..."
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance Criteria
+      description: List specific conditions that must be met for this task to be considered complete.
+      placeholder: |
+        - [ ] Audio recording starts/stops correctly
+        - [ ] Output format is 16kHz mono PCM
+        - [ ] Unit tests pass
+    validations:
+      required: true
+  - type: textarea
+    id: files
+    attributes:
+      label: Files to Create/Modify
+      description: List the files that will likely need to be created or modified.
+      placeholder: |
+        - src-tauri/src/audio/mod.rs (create)
+        - src-tauri/src/audio/recorder.rs (create)
+        - src-tauri/Cargo.toml (modify - add cpal dependency)
+    validations:
+      required: false
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      description: Any relevant context, references, or related issues.
+    validations:
+      required: false
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options:
+        - High
+        - Medium
+        - Low
+      default: 1
+    validations:
+      required: true
