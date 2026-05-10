@@ -1,115 +1,155 @@
 /* ============================================================
-   CSS Variables — Light theme (default)
+   Voice Typing — Premium macOS-native Design System
+   Inspired by Apple HIG + Typeless aesthetics
    ============================================================ */
+
+/* ── Design Tokens — Light Theme ─────────────────────────── */
 :root {
   /* Typography */
-  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
-  font-size: 16px;
-  line-height: 24px;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI",
+    Inter, Helvetica, Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
   font-weight: 400;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 
-  /* Background colors */
-  --bg-primary: #f6f6f6;
+  /* Background */
+  --bg-primary: #f5f5f7;
   --bg-secondary: #ffffff;
-  --bg-tertiary: #f0f0f0;
-  --bg-overlay: rgba(0, 0, 0, 0.8);
+  --bg-tertiary: #f0f0f2;
+  --bg-elevated: #ffffff;
+  --bg-overlay: rgba(0, 0, 0, 0.75);
+  --bg-glass: rgba(255, 255, 255, 0.72);
+  --bg-glass-hover: rgba(255, 255, 255, 0.85);
+  --bg-inset: rgba(0, 0, 0, 0.03);
 
-  /* Text colors */
-  --text-primary: #0f0f0f;
-  --text-secondary: #555;
-  --text-muted: #999;
-  --text-subtle: #666;
+  /* Text */
+  --text-primary: #1d1d1f;
+  --text-secondary: #6e6e73;
+  --text-muted: #98989d;
+  --text-subtle: #86868b;
 
-  /* Border colors */
-  --border: #ddd;
-  --border-strong: #ccc;
-  --border-muted: #eee;
+  /* Border */
+  --border: rgba(0, 0, 0, 0.08);
+  --border-strong: rgba(0, 0, 0, 0.12);
+  --border-muted: rgba(0, 0, 0, 0.04);
+  --border-focus: rgba(0, 122, 255, 0.4);
 
-  /* Accent / brand colors */
-  --accent: #396cd8;
-  --accent-hover: #2d5abc;
+  /* Accent */
+  --accent: #007aff;
+  --accent-hover: #0062cc;
+  --accent-soft: rgba(0, 122, 255, 0.08);
+  --accent-medium: rgba(0, 122, 255, 0.15);
 
-  /* Status indicator colors (same in both modes) */
-  --status-idle: #4caf50;
-  --status-recording: #f44336;
-  --status-processing: #ff9800;
-  --status-default: #aaa;
+  /* Status */
+  --status-idle: #34c759;
+  --status-recording: #ff3b30;
+  --status-processing: #ff9f0a;
+  --status-default: #c7c7cc;
 
-  /* Shadows */
-  --shadow-sm: 0 1px 4px rgba(0, 0, 0, 0.06);
-  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.08);
-  --shadow-lg: 0 2px 8px rgba(0, 0, 0, 0.12);
+  /* Shadows — layered for depth */
+  --shadow-xs: 0 0.5px 1px rgba(0, 0, 0, 0.04);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.04);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.04);
+  --shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.16), 0 4px 12px rgba(0, 0, 0, 0.06);
 
-  /* Interactive elements */
+  /* Interactive */
   --btn-bg: #ffffff;
-  --btn-text: #333;
-  --btn-border: #ddd;
+  --btn-text: #1d1d1f;
+  --btn-border: rgba(0, 0, 0, 0.12);
   --input-bg: #ffffff;
-  --input-text: #0f0f0f;
-  --kbd-bg: #e8e8e8;
-  --kbd-border: #ccc;
-  --history-duration-bg: #f0f0f0;
-  --history-duration-text: #666;
-  --history-preview-text: #333;
-  --detail-text-color: #555;
+  --input-text: #1d1d1f;
+  --kbd-bg: rgba(0, 0, 0, 0.05);
+  --kbd-border: rgba(0, 0, 0, 0.1);
+  --history-duration-bg: rgba(0, 122, 255, 0.08);
+  --history-duration-text: var(--accent);
+  --history-preview-text: #1d1d1f;
+  --detail-text-color: #6e6e73;
 
-  /* Apply root colors */
+  /* Radius */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+
+  /* Transition */
+  --ease-out: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  --ease-spring: cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  --duration-fast: 150ms;
+  --duration-normal: 250ms;
+  --duration-slow: 350ms;
+
+  /* Apply */
   color: var(--text-primary);
   background-color: var(--bg-primary);
 }
 
-/* ============================================================
-   CSS Variables — Dark theme override
-   ============================================================ */
+/* ── Design Tokens — Dark Theme ──────────────────────────── */
 @media (prefers-color-scheme: dark) {
   :root {
-    /* Background colors */
-    --bg-primary: #1a1a1a;
-    --bg-secondary: #2a2a2a;
-    --bg-tertiary: #333;
+    --bg-primary: #1c1c1e;
+    --bg-secondary: #2c2c2e;
+    --bg-tertiary: #3a3a3c;
+    --bg-elevated: #2c2c2e;
     --bg-overlay: rgba(0, 0, 0, 0.85);
+    --bg-glass: rgba(44, 44, 46, 0.72);
+    --bg-glass-hover: rgba(44, 44, 46, 0.88);
+    --bg-inset: rgba(255, 255, 255, 0.03);
 
-    /* Text colors */
-    --text-primary: #f6f6f6;
-    --text-secondary: #bbb;
-    --text-muted: #888;
-    --text-subtle: #aaa;
+    --text-primary: #f5f5f7;
+    --text-secondary: #a1a1a6;
+    --text-muted: #6e6e73;
+    --text-subtle: #86868b;
 
-    /* Border colors */
-    --border: #444;
-    --border-strong: #555;
-    --border-muted: #3a3a3a;
+    --border: rgba(255, 255, 255, 0.08);
+    --border-strong: rgba(255, 255, 255, 0.15);
+    --border-muted: rgba(255, 255, 255, 0.04);
+    --border-focus: rgba(0, 122, 255, 0.5);
 
-    /* Shadows — slightly more visible on dark backgrounds */
-    --shadow-sm: 0 1px 4px rgba(0, 0, 0, 0.2);
-    --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.3);
-    --shadow-lg: 0 2px 8px rgba(0, 0, 0, 0.4);
+    --accent-soft: rgba(0, 122, 255, 0.12);
+    --accent-medium: rgba(0, 122, 255, 0.2);
 
-    /* Interactive elements */
-    --btn-bg: #2a2a2a;
-    --btn-text: #eee;
-    --btn-border: #444;
-    --input-bg: #2a2a2a;
-    --input-text: #eee;
-    --kbd-bg: #333;
-    --kbd-border: #555;
-    --history-duration-bg: #333;
-    --history-duration-text: #aaa;
-    --history-preview-text: #ddd;
-    --detail-text-color: #bbb;
+    --shadow-xs: 0 0.5px 1px rgba(0, 0, 0, 0.2);
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.25), 0 1px 2px rgba(0, 0, 0, 0.15);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.15);
+    --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.4), 0 2px 6px rgba(0, 0, 0, 0.2);
+    --shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.5), 0 4px 12px rgba(0, 0, 0, 0.25);
+
+    --btn-bg: #3a3a3c;
+    --btn-text: #f5f5f7;
+    --btn-border: rgba(255, 255, 255, 0.1);
+    --input-bg: #1c1c1e;
+    --input-text: #f5f5f7;
+    --kbd-bg: rgba(255, 255, 255, 0.08);
+    --kbd-border: rgba(255, 255, 255, 0.12);
+    --history-duration-bg: rgba(0, 122, 255, 0.15);
+    --history-duration-text: #64b5f6;
+    --history-preview-text: #f5f5f7;
+    --detail-text-color: #a1a1a6;
   }
 }
 
-/* ============================================================
-   Layout
-   ============================================================ */
+/* ── Reset & Global ──────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+/* ── Layout ──────────────────────────────────────────────── */
 .container {
   margin: 0;
-  padding: 24px;
+  padding: 28px 24px;
   display: flex;
   flex-direction: column;
   min-height: 100vh;
@@ -118,263 +158,382 @@
 
 h1 {
   text-align: center;
-  margin-bottom: 24px;
-  font-size: 1.5em;
+  margin: 0 0 24px 0;
+  font-size: 1.4em;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
 }
 
-/* ============================================================
-   Status indicator
-   ============================================================ */
+/* ── Status Indicator ────────────────────────────────────── */
 .status-indicator {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 12px;
-  padding: 16px;
-  border-radius: 12px;
+  padding: 18px 24px;
+  border-radius: var(--radius-lg);
   background: var(--bg-secondary);
-  box-shadow: var(--shadow-md);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
   margin-bottom: 16px;
+  transition: all var(--duration-normal) var(--ease-out);
+}
+
+.status-indicator:hover {
+  box-shadow: var(--shadow-md);
 }
 
 .status-dot {
-  width: 12px;
-  height: 12px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   background: var(--status-default);
+  transition: all var(--duration-normal) var(--ease-out);
+  flex-shrink: 0;
 }
 
 .status-dot.idle {
   background: var(--status-idle);
+  box-shadow: 0 0 0 3px rgba(52, 199, 89, 0.2);
 }
 
 .status-dot.recording {
   background: var(--status-recording);
-  animation: pulse 1s infinite;
+  box-shadow: 0 0 0 3px rgba(255, 59, 48, 0.2);
+  animation: pulse-recording 1.5s ease-in-out infinite;
 }
 
 .status-dot.processing {
   background: var(--status-processing);
-  animation: pulse 0.5s infinite;
+  box-shadow: 0 0 0 3px rgba(255, 159, 10, 0.2);
+  animation: pulse-processing 1s ease-in-out infinite;
 }
 
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
+@keyframes pulse-recording {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+    box-shadow: 0 0 0 3px rgba(255, 59, 48, 0.2);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(1.15);
+    box-shadow: 0 0 0 6px rgba(255, 59, 48, 0.1);
+  }
+}
+
+@keyframes pulse-processing {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(0.9);
+  }
 }
 
 .status-text {
-  font-size: 0.95em;
+  font-size: 0.92em;
+  font-weight: 500;
   color: var(--text-secondary);
 }
 
-/* ============================================================
-   Last text
-   ============================================================ */
+/* ── Last Text ───────────────────────────────────────────── */
 .last-text {
-  padding: 12px 16px;
+  padding: 14px 18px;
   background: var(--bg-secondary);
-  border-radius: 8px;
-  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-xs);
   margin-bottom: 16px;
+  transition: all var(--duration-normal) var(--ease-out);
+}
+
+.last-text:hover {
+  box-shadow: var(--shadow-sm);
 }
 
 .last-text .label {
-  font-size: 0.8em;
+  font-size: 0.75em;
+  font-weight: 600;
   color: var(--text-muted);
-  margin: 0 0 4px 0;
+  margin: 0 0 6px 0;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .last-text .text {
   margin: 0;
-  font-size: 0.95em;
-}
-
-/* ============================================================
-   Hint
-   ============================================================ */
-.hint {
-  text-align: center;
-  color: var(--text-muted);
-  font-size: 0.85em;
-  margin-top: auto;
-  padding-top: 16px;
-}
-
-kbd {
-  padding: 2px 6px;
-  border-radius: 4px;
-  background: var(--kbd-bg);
-  border: 1px solid var(--kbd-border);
-  font-size: 0.85em;
-  font-family: inherit;
+  font-size: 0.92em;
+  line-height: 1.5;
   color: var(--text-primary);
 }
 
-/* ============================================================
-   Buttons
-   ============================================================ */
+/* ── Hint ────────────────────────────────────────────────── */
+.hint {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.82em;
+  margin-top: auto;
+  padding-top: 20px;
+  line-height: 1.6;
+}
+
+kbd {
+  padding: 3px 7px;
+  border-radius: var(--radius-sm);
+  background: var(--kbd-bg);
+  border: 1px solid var(--kbd-border);
+  font-size: 0.82em;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Mono", "Fira Code",
+    monospace;
+  color: var(--text-primary);
+  font-weight: 500;
+  box-shadow: var(--shadow-xs);
+}
+
+/* ── Buttons ─────────────────────────────────────────────── */
 .actions {
   display: flex;
   justify-content: center;
-  gap: 8px;
+  gap: 10px;
   margin: 16px 0;
 }
 
 button {
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--btn-border);
-  padding: 8px 20px;
-  font-size: 0.9em;
+  padding: 9px 20px;
+  font-size: 0.88em;
   font-weight: 500;
   font-family: inherit;
   cursor: pointer;
   background: var(--btn-bg);
   color: var(--btn-text);
-  transition: all 0.2s;
+  transition: all var(--duration-fast) var(--ease-out);
+  box-shadow: var(--shadow-xs);
+  outline: none;
 }
 
 button:hover {
-  border-color: var(--accent);
-  color: var(--accent);
+  background: var(--bg-glass-hover);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-0.5px);
+}
+
+button:active {
+  transform: translateY(0.5px);
+  box-shadow: var(--shadow-xs);
+}
+
+button:focus-visible {
+  box-shadow: 0 0 0 3px var(--border-focus);
 }
 
 button:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
 }
 
 button.primary {
   background: var(--accent);
   color: white;
   border-color: var(--accent);
+  box-shadow: var(--shadow-sm), 0 2px 8px rgba(0, 122, 255, 0.2);
 }
 
 button.primary:hover {
   background: var(--accent-hover);
   border-color: var(--accent-hover);
   color: white;
+  box-shadow: var(--shadow-md), 0 4px 12px rgba(0, 122, 255, 0.25);
+  transform: translateY(-0.5px);
+}
+
+button.primary:active {
+  transform: translateY(0.5px);
+  box-shadow: var(--shadow-xs);
 }
 
 button.danger {
   background: var(--status-recording);
   color: white;
   border-color: var(--status-recording);
+  box-shadow: var(--shadow-sm), 0 2px 8px rgba(255, 59, 48, 0.2);
 }
 
 button.danger:hover {
-  background: #d32f2f;
-  border-color: #d32f2f;
+  background: #e0332b;
+  border-color: #e0332b;
   color: white;
+  box-shadow: var(--shadow-md), 0 4px 12px rgba(255, 59, 48, 0.25);
 }
 
-/* ============================================================
-   Settings form
-   ============================================================ */
+/* ── Settings Form ───────────────────────────────────────── */
 .settings .form-group {
-  margin-bottom: 20px;
+  margin-bottom: 22px;
   text-align: left;
 }
 
 .settings label {
   display: block;
-  font-weight: 500;
-  margin-bottom: 6px;
-  font-size: 0.9em;
+  font-weight: 600;
+  margin-bottom: 7px;
+  font-size: 0.88em;
+  color: var(--text-primary);
 }
 
 .settings input[type="password"],
 .settings input[type="text"] {
   width: 100%;
-  padding: 10px 12px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  font-size: 0.9em;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-strong);
+  font-size: 0.88em;
   box-sizing: border-box;
   outline: none;
-  transition: border-color 0.2s;
+  transition: all var(--duration-fast) var(--ease-out);
   background: var(--input-bg);
   color: var(--input-text);
+  box-shadow: var(--shadow-xs);
 }
 
 .settings input:focus {
   border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--border-focus), var(--shadow-xs);
+}
+
+.settings input::placeholder {
+  color: var(--text-muted);
+}
+
+.settings select {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-strong);
+  font-size: 0.88em;
+  box-sizing: border-box;
+  outline: none;
+  transition: all var(--duration-fast) var(--ease-out);
+  background: var(--input-bg);
+  color: var(--input-text);
+  box-shadow: var(--shadow-xs);
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 5l3 3 3-3' fill='none' stroke='%236e6e73' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 32px;
+}
+
+.settings select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--border-focus), var(--shadow-xs);
 }
 
 .form-hint {
-  font-size: 0.8em;
+  font-size: 0.78em;
   color: var(--text-muted);
-  margin: 6px 0 0 0;
+  margin: 7px 0 0 0;
+  line-height: 1.5;
 }
 
 .form-hint a {
   color: var(--accent);
   text-decoration: none;
+  transition: opacity var(--duration-fast);
+}
+
+.form-hint a:hover {
+  opacity: 0.75;
 }
 
 .checkbox-label {
   display: flex !important;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   cursor: pointer;
+  padding: 2px 0;
 }
 
 .checkbox-label input[type="checkbox"] {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   accent-color: var(--accent);
+  border-radius: 4px;
+  cursor: pointer;
 }
 
 .error {
   color: var(--status-recording);
-  font-size: 0.85em;
+  font-size: 0.82em;
   text-align: center;
+  font-weight: 500;
 }
 
-/* ============================================================
-   Recording overlay
-   ============================================================ */
+/* ── Recording Overlay ───────────────────────────────────── */
 .recording-overlay {
   position: fixed;
-  top: 12px;
+  top: 14px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-  border-radius: 20px;
+  gap: 10px;
+  padding: 10px 18px;
+  border-radius: var(--radius-xl);
   background: var(--bg-overlay);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
   color: white;
-  font-size: 0.85em;
+  font-size: 0.82em;
+  font-weight: 500;
   z-index: 9999;
   pointer-events: none;
+  box-shadow: var(--shadow-lg);
+  animation: overlay-enter 0.3s var(--ease-spring);
+}
+
+@keyframes overlay-enter {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-8px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0) scale(1);
+  }
 }
 
 .overlay-dot {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
 }
 
 .overlay-dot.recording {
   background: var(--status-recording);
-  animation: pulse 1s infinite;
+  animation: pulse-recording 1.5s ease-in-out infinite;
 }
 
 .overlay-dot.processing {
   background: var(--status-processing);
-  animation: pulse 0.5s infinite;
+  animation: pulse-processing 1s ease-in-out infinite;
 }
 
-/* ============================================================
-   History page
-   ============================================================ */
+/* ── History Page ────────────────────────────────────────── */
 .history .empty-hint {
   text-align: center;
   color: var(--text-muted);
   font-size: 0.9em;
-  padding: 24px 0;
+  padding: 40px 0;
 }
 
 .history-list {
@@ -384,75 +543,94 @@ button.danger:hover {
 }
 
 .history-item {
-  padding: 12px 16px;
+  padding: 14px 18px;
   background: var(--bg-secondary);
-  border-radius: 8px;
-  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xs);
   cursor: pointer;
-  transition: box-shadow 0.2s;
+  transition: all var(--duration-normal) var(--ease-out);
 }
 
 .history-item:hover {
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--shadow-md);
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
 }
 
 .history-item.expanded {
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--shadow-md);
+  border-color: var(--accent);
+  background: var(--bg-elevated);
 }
 
 .history-item-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
 }
 
 .history-timestamp {
-  font-size: 0.8em;
+  font-size: 0.78em;
   color: var(--text-muted);
+  font-weight: 500;
 }
 
 .history-duration {
-  font-size: 0.75em;
+  font-size: 0.72em;
+  font-weight: 600;
   color: var(--history-duration-text);
   background: var(--history-duration-bg);
-  padding: 2px 8px;
-  border-radius: 10px;
+  padding: 3px 9px;
+  border-radius: var(--radius-xl);
 }
 
 .history-preview {
   margin: 0;
-  font-size: 0.9em;
+  font-size: 0.88em;
   color: var(--history-preview-text);
-  line-height: 1.4;
-}
-
-.history-detail {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border-muted);
-}
-
-.detail-section {
-  margin-bottom: 8px;
-}
-
-.detail-label {
-  font-size: 0.75em;
-  color: var(--text-muted);
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.detail-text {
-  margin: 4px 0 0 0;
-  font-size: 0.85em;
-  color: var(--detail-text-color);
   line-height: 1.5;
 }
 
-/* Per-item action buttons rendered inside expanded history cards */
+.history-detail {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  animation: detail-enter 0.25s var(--ease-out);
+}
+
+@keyframes detail-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.detail-section {
+  margin-bottom: 10px;
+}
+
+.detail-label {
+  font-size: 0.72em;
+  color: var(--text-muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.detail-text {
+  margin: 5px 0 0 0;
+  font-size: 0.84em;
+  color: var(--detail-text-color);
+  line-height: 1.6;
+}
+
+/* Per-item action buttons */
 .history-item-actions {
   display: flex;
   gap: 8px;
@@ -461,60 +639,76 @@ button.danger:hover {
 }
 
 .item-action {
-  padding: 4px 12px;
-  font-size: 0.8em;
-  border-radius: 6px;
-  border: 1px solid var(--border-muted);
+  padding: 5px 14px;
+  font-size: 0.78em;
+  font-weight: 500;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
   background: var(--bg-primary);
   color: var(--text-primary);
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
+  transition: all var(--duration-fast) var(--ease-out);
+  box-shadow: var(--shadow-xs);
 }
 
 .item-action:hover {
-  background: var(--bg-secondary);
+  background: var(--accent-soft);
   border-color: var(--accent);
+  color: var(--accent);
+  transform: translateY(-0.5px);
 }
 
 .item-action.danger {
-  color: var(--danger, #e53e3e);
-  border-color: var(--danger, #e53e3e);
+  color: var(--status-recording);
+  border-color: rgba(255, 59, 48, 0.3);
 }
 
 .item-action.danger:hover,
 .item-action.danger.active {
-  background: var(--danger, #e53e3e);
+  background: var(--status-recording);
+  border-color: var(--status-recording);
   color: #fff;
 }
 
-/* ============================================================
-   Onboarding wizard
-   ============================================================ */
+/* ── Error hint (history page) ───────────────────────────── */
+.error-hint {
+  text-align: center;
+  color: var(--status-recording);
+  font-size: 0.82em;
+  padding: 8px 12px;
+  background: rgba(255, 59, 48, 0.08);
+  border-radius: var(--radius-md);
+  margin-bottom: 12px;
+  cursor: pointer;
+}
 
-/* Progress dots bar */
+/* ── Onboarding Wizard ───────────────────────────────────── */
+
+/* Progress dots */
 .onboarding-progress {
   display: flex;
   justify-content: center;
   gap: 8px;
-  margin-bottom: 24px;
+  margin-bottom: 28px;
 }
 
 .onboarding-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--border);
-  transition: background 0.3s;
+  background: var(--border-strong);
+  transition: all var(--duration-normal) var(--ease-spring);
 }
 
 .onboarding-dot.active {
   background: var(--accent);
-  transform: scale(1.25);
+  transform: scale(1.4);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .onboarding-dot.done {
   background: var(--accent);
-  opacity: 0.4;
+  opacity: 0.35;
 }
 
 /* Step wrapper */
@@ -522,62 +716,78 @@ button.danger:hover {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
   text-align: center;
 }
 
 .onboarding-step h2 {
-  font-size: 1.2em;
+  font-size: 1.25em;
+  font-weight: 700;
+  letter-spacing: -0.02em;
   margin: 0;
   color: var(--text-primary);
 }
 
 .onboarding-step p {
   margin: 0;
-  font-size: 0.9em;
+  font-size: 0.88em;
   color: var(--text-secondary);
-  line-height: 1.6;
+  line-height: 1.65;
 }
 
-/* Large emoji icon at top of each step */
+/* Icon */
 .onboarding-icon {
-  font-size: 2.5em;
+  font-size: 2.8em;
   line-height: 1;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.1));
 }
 
-/* Feature list on welcome step */
+/* Feature list */
 .onboarding-feature-list {
   list-style: none;
   padding: 0;
   margin: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   text-align: left;
 }
 
 .onboarding-feature-list li {
-  font-size: 0.88em;
+  font-size: 0.86em;
   color: var(--text-secondary);
-  padding: 6px 10px;
+  padding: 10px 14px;
   background: var(--bg-secondary);
-  border-radius: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-xs);
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.onboarding-feature-list li:hover {
   box-shadow: var(--shadow-sm);
+  transform: translateX(2px);
 }
 
 .onboarding-feature-list li::before {
-  content: "✓ ";
-  color: var(--accent);
-  font-weight: 600;
+  content: "\2713 ";
+  color: var(--status-idle);
+  font-weight: 700;
 }
 
-/* Permission cards on permissions step */
+/* Permission cards */
 .onboarding-permission-card {
   text-align: left;
   background: var(--bg-secondary);
-  border-radius: 8px;
-  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px;
   box-shadow: var(--shadow-sm);
+  transition: all var(--duration-normal) var(--ease-out);
+}
+
+.onboarding-permission-card:hover {
+  box-shadow: var(--shadow-md);
 }
 
 .permission-title {
@@ -588,81 +798,85 @@ button.danger:hover {
 }
 
 .permission-desc {
-  font-size: 0.83em;
+  font-size: 0.82em;
   color: var(--text-secondary);
   line-height: 1.5;
 }
 
-/* Permission status row — dot + badge + open-settings button */
+/* Permission status row */
 .permission-status-row,
 .permission-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 8px;
+  margin-top: 10px;
   flex-wrap: wrap;
 }
 
-/* Green / red status dot */
 .permission-dot {
   width: 10px;
   height: 10px;
   border-radius: 50%;
   flex-shrink: 0;
+  transition: all var(--duration-normal) var(--ease-out);
 }
 
 .permission-dot--granted {
-  background: #34c759; /* macOS green */
+  background: #34c759;
+  box-shadow: 0 0 0 2px rgba(52, 199, 89, 0.2);
 }
 
 .permission-dot--denied {
-  background: #ff3b30; /* macOS red */
+  background: #ff3b30;
+  box-shadow: 0 0 0 2px rgba(255, 59, 48, 0.2);
 }
 
-/* Permission name label (used in Settings list) */
 .permission-name {
   font-size: 0.88em;
   color: var(--text-primary);
   flex: 1;
   min-width: 80px;
+  font-weight: 500;
 }
 
-/* Granted / Not Granted badge */
 .permission-badge {
-  font-size: 0.8em;
+  font-size: 0.75em;
   font-weight: 600;
-  padding: 2px 7px;
-  border-radius: 4px;
+  padding: 3px 9px;
+  border-radius: var(--radius-xl);
 }
 
 .permission-badge--granted {
   color: #34c759;
-  background: rgba(52, 199, 89, 0.12);
+  background: rgba(52, 199, 89, 0.1);
 }
 
 .permission-badge--denied {
   color: #ff3b30;
-  background: rgba(255, 59, 48, 0.12);
+  background: rgba(255, 59, 48, 0.1);
 }
 
-/* Small "Open Settings" button */
 .permission-open-btn {
-  font-size: 0.8em;
-  padding: 3px 10px;
-  border-radius: 5px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
+  font-size: 0.78em;
+  font-weight: 500;
+  padding: 4px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--btn-bg);
+  border: 1px solid var(--btn-border);
   color: var(--text-primary);
   cursor: pointer;
   white-space: nowrap;
+  transition: all var(--duration-fast) var(--ease-out);
+  box-shadow: var(--shadow-xs);
 }
 
 .permission-open-btn:hover {
-  background: var(--bg-hover, var(--bg-secondary));
-  opacity: 0.85;
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
-/* API key step — left-align the form */
+/* API key step */
 .onboarding-step.settings {
   text-align: left;
 }
@@ -672,24 +886,31 @@ button.danger:hover {
   text-align: center;
 }
 
-/* Hotkey demo cards */
+/* Hotkey demo */
 .onboarding-hotkey-demo {
   background: var(--bg-secondary);
-  border-radius: 10px;
-  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 18px;
   box-shadow: var(--shadow-sm);
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  transition: all var(--duration-normal) var(--ease-out);
+}
+
+.onboarding-hotkey-demo:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
 }
 
 .hotkey-label {
-  font-size: 0.8em;
+  font-size: 0.75em;
   color: var(--text-muted);
-  font-weight: 500;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.06em;
 }
 
 .hotkey-keys {
@@ -700,44 +921,44 @@ button.danger:hover {
 
 .hotkey-plus {
   color: var(--text-muted);
-  font-size: 0.85em;
+  font-size: 0.82em;
 }
 
 .hotkey-keys kbd {
-  font-size: 1em;
-  padding: 4px 10px;
+  font-size: 1.05em;
+  padding: 5px 12px;
+  box-shadow: var(--shadow-sm);
 }
 
 .hotkey-hint {
-  font-size: 0.8em;
+  font-size: 0.78em;
   color: var(--text-secondary);
 }
 
 /* Done step tip */
 .onboarding-tip {
-  background: var(--bg-secondary);
-  border-radius: 8px;
-  padding: 10px 14px;
-  font-size: 0.85em !important;
+  background: var(--accent-soft);
+  border: 1px solid rgba(0, 122, 255, 0.12);
+  border-radius: var(--radius-md);
+  padding: 12px 16px;
+  font-size: 0.84em !important;
   color: var(--text-secondary) !important;
 }
 
-/* Navigation row at the bottom */
+/* Navigation */
 .onboarding-nav {
   display: flex;
   justify-content: space-between;
-  gap: 8px;
+  gap: 10px;
   margin-top: auto;
-  padding-top: 20px;
+  padding-top: 24px;
 }
 
 .onboarding-nav button {
   flex: 1;
 }
 
-/* ============================================================
-   Settings tabs
-   ============================================================ */
+/* ── Settings Tabs ───────────────────────────────────────── */
 .settings-tabs {
   display: flex;
   flex-direction: column;
@@ -747,41 +968,48 @@ button.danger:hover {
 
 .tab-bar {
   display: flex;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 20px;
-  gap: 0;
+  background: var(--bg-inset);
+  border-radius: var(--radius-md);
+  padding: 3px;
+  margin-bottom: 22px;
+  gap: 2px;
 }
 
 .tab-btn {
   background: none;
   border: none;
-  border-bottom: 2px solid transparent;
-  border-radius: 0;
+  border-radius: calc(var(--radius-md) - 2px);
   padding: 8px 16px;
-  font-size: 0.88em;
+  font-size: 0.84em;
   font-weight: 500;
   color: var(--text-secondary);
   cursor: pointer;
-  transition: color 0.2s, border-color 0.2s;
-  margin-bottom: -1px;
+  transition: all var(--duration-fast) var(--ease-out);
+  flex: 1;
+  text-align: center;
+  box-shadow: none;
 }
 
 .tab-btn:hover {
   color: var(--text-primary);
+  background: transparent;
   border-color: transparent;
-  background: none;
+  box-shadow: none;
+  transform: none;
 }
 
 .tab-btn.active {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
-  background: none;
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  box-shadow: var(--shadow-sm);
+  font-weight: 600;
 }
 
 .tab-panel {
   flex: 1;
   overflow-y: auto;
   min-height: 0;
+  padding: 0 2px;
 }
 
 /* About tab */
@@ -790,37 +1018,40 @@ button.danger:hover {
   flex-direction: column;
   align-items: center;
   gap: 16px;
-  padding: 8px 0;
+  padding: 12px 0;
   text-align: center;
 }
 
 .about-app-name {
-  font-size: 1.3em;
-  font-weight: 600;
+  font-size: 1.4em;
+  font-weight: 700;
+  letter-spacing: -0.02em;
   color: var(--text-primary);
   margin: 0;
 }
 
 .about-version {
-  font-size: 0.85em;
+  font-size: 0.84em;
   color: var(--text-muted);
   margin: 0;
+  font-weight: 500;
 }
 
 .about-tech {
-  font-size: 0.85em;
+  font-size: 0.82em;
   color: var(--text-secondary);
   background: var(--bg-secondary);
-  border-radius: 8px;
-  padding: 10px 16px;
-  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 14px 18px;
+  box-shadow: var(--shadow-xs);
   width: 100%;
   box-sizing: border-box;
   text-align: left;
 }
 
 .about-tech p {
-  margin: 0 0 4px 0;
+  margin: 0 0 5px 0;
 }
 
 .about-tech p:last-child {
@@ -830,17 +1061,27 @@ button.danger:hover {
 .about-link {
   color: var(--accent);
   text-decoration: none;
-  font-size: 0.9em;
+  font-size: 0.88em;
+  font-weight: 500;
+  transition: opacity var(--duration-fast);
 }
 
 .about-link:hover {
-  text-decoration: underline;
+  opacity: 0.7;
 }
 
 .about-powered {
-  font-size: 0.8em;
+  font-size: 0.78em;
   color: var(--text-muted);
   margin: 0;
+}
+
+.about-update {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
 }
 
 /* Shortcuts tab */
@@ -854,14 +1095,22 @@ button.danger:hover {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 10px 14px;
+  padding: 12px 16px;
   background: var(--bg-secondary);
-  border-radius: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-xs);
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.shortcut-row:hover {
   box-shadow: var(--shadow-sm);
+  transform: translateY(-0.5px);
 }
 
 .shortcut-label {
-  font-size: 0.9em;
+  font-size: 0.88em;
+  font-weight: 500;
   color: var(--text-primary);
 }
 
@@ -872,20 +1121,19 @@ button.danger:hover {
 }
 
 .shortcut-plus {
-  font-size: 0.8em;
+  font-size: 0.78em;
   color: var(--text-muted);
 }
 
 .shortcuts-note {
-  margin-top: 12px;
-  font-size: 0.82em;
+  margin-top: 14px;
+  font-size: 0.78em;
   color: var(--text-muted);
   text-align: center;
+  font-style: italic;
 }
 
-/* ============================================================
-   Personal dictionary (Settings page)
-   ============================================================ */
+/* ── Personal Dictionary ─────────────────────────────────── */
 .dictionary-input-row {
   display: flex;
   gap: 8px;
@@ -903,26 +1151,32 @@ button.danger:hover {
 
 .dictionary-list {
   list-style: none;
-  margin: 10px 0 0 0;
+  margin: 12px 0 0 0;
   padding: 0;
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
 }
 
 .dictionary-item {
   display: flex;
   align-items: center;
-  gap: 4px;
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border);
-  border-radius: 20px;
-  padding: 3px 10px 3px 12px;
-  font-size: 0.85em;
+  gap: 5px;
+  background: var(--accent-soft);
+  border: 1px solid rgba(0, 122, 255, 0.12);
+  border-radius: var(--radius-xl);
+  padding: 4px 10px 4px 13px;
+  font-size: 0.82em;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.dictionary-item:hover {
+  background: var(--accent-medium);
 }
 
 .dictionary-term {
   color: var(--text-primary);
+  font-weight: 500;
 }
 
 .dictionary-remove {
@@ -934,24 +1188,38 @@ button.danger:hover {
   line-height: 1;
   color: var(--text-muted);
   border-radius: 50%;
+  box-shadow: none;
+  transition: color var(--duration-fast);
 }
 
 .dictionary-remove:hover {
   color: var(--status-recording);
   border-color: transparent;
   background: none;
+  box-shadow: none;
+  transform: none;
 }
 
-/* ============================================================
-   Inline field save-status indicator (auto-save feedback)
-   ============================================================ */
+/* ── Field Save Status ───────────────────────────────────── */
 .field-status {
   display: inline-block;
-  margin-left: 6px;
-  font-size: 0.85em;
+  margin-left: 8px;
+  font-size: 0.82em;
   font-weight: 600;
   vertical-align: middle;
-  transition: opacity 0.3s;
+  transition: opacity var(--duration-normal);
+  animation: field-status-enter 0.2s var(--ease-out);
+}
+
+@keyframes field-status-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .field-status--saved {
@@ -960,4 +1228,38 @@ button.danger:hover {
 
 .field-status--error {
   color: var(--status-recording);
+}
+
+/* ── Scrollbar styling ───────────────────────────────────── */
+.tab-panel::-webkit-scrollbar {
+  width: 6px;
+}
+
+.tab-panel::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.tab-panel::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 3px;
+}
+
+.tab-panel::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* ── Smooth transitions for page changes ─────────────────── */
+.container {
+  animation: page-enter 0.25s var(--ease-out);
+}
+
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }

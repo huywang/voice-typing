@@ -1,67 +1,89 @@
 /* ============================================================
-   FloatingBar — transparent pill-shaped recording status indicator
+   FloatingBar — Premium glassmorphism recording status
    Rendered inside the dedicated "floating-bar" Tauri window.
    ============================================================ */
 
-/* Reset body so the transparent window background shows through */
+/* Reset body for transparent window */
 html,
 body {
   margin: 0;
   padding: 0;
   background: transparent;
   overflow: hidden;
-  /* Prevent the user from accidentally dragging the transparent bar */
   -webkit-app-region: no-drag;
   user-select: none;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI",
+    Inter, Helvetica, Arial, sans-serif;
 }
 
-/* ── Pill container ───────────────────────────────────────── */
+/* ── Pill Container ──────────────────────────────────────── */
 .floating-bar {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 10px 20px;
-  border-radius: 30px;
-  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
-  font-size: 14px;
+  gap: 10px;
+  padding: 12px 22px;
+  border-radius: 40px;
+  font-size: 13px;
   font-weight: 500;
   line-height: 1;
   -webkit-font-smoothing: antialiased;
 
-  /* Centre the pill inside the transparent window */
+  /* Centre in the transparent window */
   position: fixed;
   inset: 0;
   margin: auto;
   width: fit-content;
   height: fit-content;
+
+  /* Enter animation */
+  animation: bar-enter 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
 
-/* Hidden placeholder — keeps the DOM node alive without any visual */
+@keyframes bar-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.85) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* Hidden placeholder */
 .floating-bar--hidden {
   opacity: 0;
   pointer-events: none;
 }
 
-/* Recording state — dark semi-transparent background */
+/* ── Recording State ─────────────────────────────────────── */
 .floating-bar--recording {
-  background: rgba(20, 20, 20, 0.82);
+  background: rgba(15, 15, 15, 0.82);
   color: #ffffff;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(24px) saturate(1.5);
+  -webkit-backdrop-filter: blur(24px) saturate(1.5);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.35),
+    0 2px 8px rgba(0, 0, 0, 0.2),
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.08);
+  border: 0.5px solid rgba(255, 255, 255, 0.06);
 }
 
-/* Processing state */
+/* ── Processing State ────────────────────────────────────── */
 .floating-bar--processing {
-  background: rgba(20, 20, 20, 0.78);
+  background: rgba(15, 15, 15, 0.78);
   color: #ffffff;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.30);
+  backdrop-filter: blur(24px) saturate(1.5);
+  -webkit-backdrop-filter: blur(24px) saturate(1.5);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.3),
+    0 2px 8px rgba(0, 0, 0, 0.15),
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.08);
+  border: 0.5px solid rgba(255, 255, 255, 0.06);
 }
 
-/* ── Status dot ───────────────────────────────────────────── */
+/* ── Status Dot ──────────────────────────────────────────── */
 .floating-dot {
   display: inline-block;
   width: 10px;
@@ -72,108 +94,137 @@ body {
 
 /* Pulsing red dot for recording */
 .floating-dot--recording {
-  background: #f44336;
-  animation: dot-pulse 1s ease-in-out infinite;
+  background: #ff3b30;
+  box-shadow: 0 0 0 3px rgba(255, 59, 48, 0.25);
+  animation: float-dot-pulse 1.5s ease-in-out infinite;
 }
 
-/* Spinning orange ring for processing */
+/* Spinning ring for processing */
 .floating-dot--processing {
   background: transparent;
-  border: 2px solid #ff9800;
+  border: 2px solid #ff9f0a;
   border-top-color: transparent;
-  animation: dot-spin 0.7s linear infinite;
+  animation: float-dot-spin 0.65s linear infinite;
 }
 
-/* ── Label ────────────────────────────────────────────────── */
+/* ── Label ───────────────────────────────────────────────── */
 .floating-label {
   letter-spacing: 0.02em;
   white-space: nowrap;
+  font-weight: 500;
 }
 
-/* ── Animations ───────────────────────────────────────────── */
-@keyframes dot-pulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.4; transform: scale(0.85); }
+/* ── Animations ──────────────────────────────────────────── */
+@keyframes float-dot-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+    box-shadow: 0 0 0 3px rgba(255, 59, 48, 0.25);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(0.8);
+    box-shadow: 0 0 0 6px rgba(255, 59, 48, 0.08);
+  }
 }
 
-@keyframes dot-spin {
+@keyframes float-dot-spin {
   to { transform: rotate(360deg); }
 }
 
-/* ── Result state ─────────────────────────────────────────── */
-/* Wider pill to accommodate text preview and action buttons. */
+/* ── Result State ────────────────────────────────────────── */
 .floating-bar--result {
-  background: rgba(25, 25, 25, 0.90);
+  background: rgba(20, 20, 20, 0.88);
   color: #ffffff;
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.40);
-  gap: 10px;
-  max-width: 420px;
-  padding: 10px 14px;
+  backdrop-filter: blur(28px) saturate(1.6);
+  -webkit-backdrop-filter: blur(28px) saturate(1.6);
+  box-shadow:
+    0 12px 40px rgba(0, 0, 0, 0.4),
+    0 3px 10px rgba(0, 0, 0, 0.2),
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.1);
+  border: 0.5px solid rgba(255, 255, 255, 0.08);
+  gap: 12px;
+  max-width: 440px;
+  padding: 11px 16px;
+  border-radius: 30px;
 }
 
-/* Green checkmark icon */
+/* Green checkmark */
 .floating-result-icon {
-  color: #4caf50;
-  font-size: 13px;
+  color: #34c759;
+  font-size: 14px;
+  font-weight: 700;
   flex-shrink: 0;
 }
 
-/* Truncated injected text */
+/* Truncated text */
 .floating-result-text {
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 13px;
-  opacity: 0.90;
+  opacity: 0.88;
   min-width: 0;
 }
 
-/* Action buttons container */
+/* Action buttons */
 .floating-result-actions {
   display: flex;
   gap: 6px;
   flex-shrink: 0;
 }
 
-/* Shared button base */
 .floating-btn {
   border: none;
-  border-radius: 6px;
+  border-radius: 8px;
   cursor: pointer;
   font-size: 12px;
   font-weight: 500;
   line-height: 1;
-  padding: 4px 10px;
-  transition: opacity 0.15s;
+  padding: 5px 12px;
+  transition: all 0.15s ease;
 }
 
 .floating-btn:hover {
-  opacity: 0.80;
+  transform: scale(1.05);
 }
 
-/* Copy button — subtle accent */
+.floating-btn:active {
+  transform: scale(0.95);
+}
+
+/* Copy button */
 .floating-btn--copy {
-  background: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.15);
   color: #ffffff;
+  backdrop-filter: blur(4px);
 }
 
-/* Dismiss button — minimal */
+.floating-btn--copy:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/* Dismiss button */
 .floating-btn--dismiss {
-  background: rgba(255, 255, 255, 0.10);
-  color: rgba(255, 255, 255, 0.70);
-  padding: 4px 8px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.6);
+  padding: 5px 9px;
 }
 
-/* ── Dark / light mode support ────────────────────────────── */
-/* The pill uses near-black bg with white text in both modes so it
-   always stands out against any desktop wallpaper. */
+.floating-btn--dismiss:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+/* ── Mode support ────────────────────────────────────────── */
+/* Use dark pill in both modes for universal wallpaper contrast */
 @media (prefers-color-scheme: light) {
   .floating-bar--recording,
-  .floating-bar--processing,
+  .floating-bar--processing {
+    background: rgba(25, 25, 25, 0.85);
+  }
   .floating-bar--result {
-    background: rgba(30, 30, 30, 0.88);
+    background: rgba(25, 25, 25, 0.9);
   }
 }
