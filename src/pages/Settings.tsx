@@ -22,6 +22,15 @@ type Tab = "general" | "ai" | "shortcuts" | "about";
 // Per-field save status for inline feedback
 type FieldStatus = "saved" | "error" | null;
 
+// Update check state
+type UpdateStatus =
+  | { kind: "idle" }
+  | { kind: "checking" }
+  | { kind: "up-to-date" }
+  | { kind: "available"; version: string; body: string }
+  | { kind: "installing" }
+  | { kind: "error"; message: string };
+
 // Fixed shortcut definitions displayed on the Shortcuts tab
 const SHORTCUTS: { label: string; keys: string[] }[] = [
   { label: "Push-to-Talk", keys: ["Cmd", "Shift", "Space"] },
@@ -76,6 +85,9 @@ function Settings({ onBack }: SettingsProps) {
     microphone: false,
     accessibility: false,
   });
+
+  // Update check state for the About tab
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus>({ kind: "idle" });
 
   // Per-field inline save status map
   const [fieldStatus, setFieldStatus] = useState<Record<string, FieldStatus>>({});
@@ -364,6 +376,34 @@ function Settings({ onBack }: SettingsProps) {
       await invoke("set_dictionary", { terms: updated });
     } catch (e) {
       console.error("Failed to save dictionary:", e);
+    }
+  };
+
+  // --- Update check handlers ---
+
+  const handleCheckForUpdate = async () => {
+    setUpdateStatus({ kind: "checking" });
+    try {
+      const result = await invoke<{ version: string; body: string } | null>("check_for_update");
+      if (result) {
+        setUpdateStatus({ kind: "available", version: result.version, body: result.body });
+      } else {
+        setUpdateStatus({ kind: "up-to-date" });
+      }
+    } catch (e) {
+      setUpdateStatus({ kind: "error", message: String(e) });
+    }
+  };
+
+  const handleInstallUpdate = async () => {
+    setUpdateStatus({ kind: "installing" });
+    try {
+      await invoke("install_update");
+      // If install_update returns without restarting (no update found race),
+      // fall back to up-to-date state.
+      setUpdateStatus({ kind: "up-to-date" });
+    } catch (e) {
+      setUpdateStatus({ kind: "error", message: String(e) });
     }
   };
 
@@ -777,6 +817,63 @@ function Settings({ onBack }: SettingsProps) {
               <p className="about-powered">
                 Powered by Alibaba Cloud DashScope
               </p>
+
+              {/* Update section */}
+              <div className="about-update">
+                {updateStatus.kind === "idle" && (
+                  <button type="button" onClick={handleCheckForUpdate}>
+                    Check for Updates
+                  </button>
+                )}
+
+                {updateStatus.kind === "checking" && (
+                  <p className="form-hint">Checking for updates…</p>
+                )}
+
+                {updateStatus.kind === "up-to-date" && (
+                  <>
+                    <p className="form-hint" style={{ color: "var(--status-idle)" }}>
+                      You&apos;re up to date!
+                    </p>
+                    <button type="button" onClick={handleCheckForUpdate}>
+                      Check Again
+                    </button>
+                  </>
+                )}
+
+                {updateStatus.kind === "available" && (
+                  <>
+                    <p className="form-hint" style={{ color: "var(--status-idle)" }}>
+                      Update available: v{updateStatus.version}
+                    </p>
+                    {updateStatus.body && (
+                      <p className="form-hint">{updateStatus.body}</p>
+                    )}
+                    <button
+                      type="button"
+                      className="primary"
+                      onClick={handleInstallUpdate}
+                    >
+                      Install &amp; Restart
+                    </button>
+                  </>
+                )}
+
+                {updateStatus.kind === "installing" && (
+                  <p className="form-hint">Downloading and installing update…</p>
+                )}
+
+                {updateStatus.kind === "error" && (
+                  <>
+                    <p className="form-hint" style={{ color: "var(--status-error, #e55)" }}>
+                      {updateStatus.message}
+                    </p>
+                    <button type="button" onClick={handleCheckForUpdate}>
+                      Try Again
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
           </div>
         )}

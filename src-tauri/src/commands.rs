@@ -1,7 +1,7 @@
 use chrono::Utc;
 use cpal::traits::{DeviceTrait, HostTrait};
 use log::{debug, error, info, warn};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use std::time::Instant;
 use tauri::{AppHandle, State};
@@ -25,6 +25,38 @@ pub struct PipelineState(pub Mutex<Pipeline>);
 /// Protected by a `Mutex` so `set_hotkey` can atomically swap the old hotkey
 /// for the new one while preventing concurrent re-registration races.
 pub struct CurrentHotkey(pub Mutex<String>);
+
+/// Inner data for the floating bar state, serialisable for IPC.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FloatingStateData {
+    /// Current status: "idle", "recording", "processing", or "result".
+    pub status: String,
+    /// Injected text, populated when status == "result".
+    pub text: String,
+}
+
+/// Managed state for the floating bar, shared between the hotkey handler and commands.
+pub struct FloatingState(pub Mutex<FloatingStateData>);
+
+/// Get the current floating bar state (status + injected text).
+#[tauri::command]
+pub fn get_floating_state(state: State<FloatingState>) -> FloatingStateData {
+    state.0.lock().unwrap().clone()
+}
+
+/// Set the floating bar state. Called by lib.rs after injection or by the frontend on dismiss.
+#[tauri::command]
+pub fn set_floating_state(
+    state: State<FloatingState>,
+    status: String,
+    text: String,
+) -> Result<(), String> {
+    debug!("set_floating_state: status={status}");
+    let mut inner = state.0.lock().unwrap();
+    inner.status = status;
+    inner.text = text;
+    Ok(())
+}
 
 /// Get the current application status.
 #[tauri::command]
@@ -159,6 +191,20 @@ pub async fn stop_and_process(
     let tone = crate::context::get_tone_for_app(&app_name);
     debug!("Context-aware tone for \"{}\": {}", app_name, tone);
 
+    // Load custom blacklist from store (best-effort; falls back to empty).
+    let custom_blacklist: Vec<String> = app
+        .store("config.json")
+        .ok()
+        .and_then(|s| {
+            s.get("app_blacklist")
+                .and_then(|v| serde_json::from_value(v).ok())
+        })
+        .unwrap_or_default();
+    let use_clipboard = crate::context::is_blacklisted(&app_name, &custom_blacklist);
+    if use_clipboard {
+        info!("App '{}' is blacklisted — using clipboard paste fallback", app_name);
+    }
+
     // LLM polishing (with fallback)
     let final_text = if let Some(llm) = &llm_client {
         let llm_start = Instant::now();
@@ -181,14 +227,14 @@ pub async fn stop_and_process(
         raw_text
     };
 
-    // Inject text
+    // Inject text — use clipboard paste for blacklisted apps, direct simulation otherwise.
     let mut injector = crate::injector::TextInjector::new()
         .map_err(|e| {
             error!("Failed to init text injector: {e}");
             format!("Failed to init text injector: {e}")
         })?;
     injector
-        .inject(&final_text)
+        .inject_smart(&final_text, use_clipboard)
         .map_err(|e| {
             error!("Failed to inject text: {e}");
             format!("Failed to inject text: {e}")
@@ -774,6 +820,49 @@ pub fn open_system_preferences(pane: String) -> Result<(), String> {
     }
 }
 
+/// Get the user-defined app compatibility blacklist from the store.
+///
+/// Returns the custom list of app names for which the clipboard-paste injection
+/// fallback should be used. The built-in default list is always active in
+/// addition to this custom list.
+#[tauri::command]
+pub fn get_blacklist(app: AppHandle) -> Vec<String> {
+    let list: Vec<String> = app
+        .store("config.json")
+        .ok()
+        .and_then(|s| {
+            s.get("app_blacklist")
+                .and_then(|v| serde_json::from_value(v).ok())
+        })
+        .unwrap_or_default();
+    debug!("get_blacklist: {} entry/entries", list.len());
+    list
+}
+
+/// Persist the user-defined app compatibility blacklist to the store.
+///
+/// The provided list is merged at runtime with the built-in `DEFAULT_BLACKLIST`
+/// inside [`crate::context::is_blacklisted`].
+#[tauri::command]
+pub fn set_blacklist(app: AppHandle, apps: Vec<String>) -> Result<(), String> {
+    info!("set_blacklist: {} entry/entries", apps.len());
+    match app.store("config.json") {
+        Ok(store) => {
+            store.set("app_blacklist", serde_json::json!(apps));
+            if let Err(e) = store.save() {
+                error!("Failed to save app_blacklist: {e}");
+                return Err(format!("Failed to save app_blacklist: {e}"));
+            }
+            info!("app_blacklist persisted");
+            Ok(())
+        }
+        Err(e) => {
+            error!("Failed to open config store for app_blacklist: {e}");
+            Err(format!("Failed to open config store: {e}"))
+        }
+    }
+}
+
 /// Get the history retention period in days from the store.
 ///
 /// Returns -1 to indicate "forever" (no cleanup). Default is -1.
@@ -885,6 +974,92 @@ pub fn set_hotkey(
         Err(e) => {
             error!("Failed to open config store for push_to_talk_hotkey: {e}");
             return Err(format!("Failed to open config store: {e}"));
+        }
+    }
+
+    Ok(())
+}
+
+// ─── Updater ──────────────────────────────────────────────────────────────────
+
+/// Information about an available update returned to the frontend.
+#[derive(Debug, Serialize)]
+pub struct UpdateInfo {
+    /// Version string of the available update (e.g. "1.2.0").
+    pub version: String,
+    /// Release notes / changelog body from the update manifest.
+    pub body: String,
+}
+
+/// Check for a new application update using the configured update endpoint.
+///
+/// Returns `Some(UpdateInfo)` when a newer version is available, or `None`
+/// when the app is already up to date.  Returns an `Err` string if the check
+/// itself fails (e.g. no network, endpoint not yet configured).
+#[tauri::command]
+pub async fn check_for_update(app: AppHandle) -> Result<Option<UpdateInfo>, String> {
+    use tauri_plugin_updater::UpdaterExt;
+
+    info!("Checking for updates (user-initiated)");
+
+    let updater = app.updater().map_err(|e| {
+        debug!("Updater not available: {e}");
+        format!("Updater not available: {e}")
+    })?;
+
+    match updater.check().await {
+        Ok(Some(update)) => {
+            let version = update.version.clone();
+            let body = update.body.clone().unwrap_or_default();
+            info!("Update available: v{version}");
+            Ok(Some(UpdateInfo { version, body }))
+        }
+        Ok(None) => {
+            info!("Already on the latest version");
+            Ok(None)
+        }
+        Err(e) => {
+            warn!("Update check failed: {e}");
+            Err(format!("Update check failed: {e}"))
+        }
+    }
+}
+
+/// Download and install the latest available update, then restart the app.
+///
+/// Should only be called after `check_for_update` returns `Some(...)`.
+/// Downloads the update package, installs it, and requests a full application
+/// restart so the new version becomes active immediately.
+#[tauri::command]
+pub async fn install_update(app: AppHandle) -> Result<(), String> {
+    use tauri_plugin_updater::UpdaterExt;
+
+    info!("Installing update (user-initiated)");
+
+    let updater = app
+        .updater()
+        .map_err(|e| format!("Updater not available: {e}"))?;
+
+    let update = updater
+        .check()
+        .await
+        .map_err(|e| format!("Failed to fetch update info: {e}"))?;
+
+    match update {
+        Some(update) => {
+            info!("Downloading and installing update v{}", update.version);
+            update
+                .download_and_install(|_chunk, _total| {}, || {})
+                .await
+                .map_err(|e| {
+                    error!("Update installation failed: {e}");
+                    format!("Installation failed: {e}")
+                })?;
+            info!("Update installed — restarting app");
+            app.restart();
+        }
+        None => {
+            info!("install_update called but no update is available");
         }
     }
 

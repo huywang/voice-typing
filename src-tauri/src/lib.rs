@@ -10,7 +10,7 @@ mod sound;
 mod tray;
 
 use chrono::Utc;
-use commands::{CurrentHotkey, HistoryState, PipelineState};
+use commands::{CurrentHotkey, FloatingState, FloatingStateData, HistoryState, PipelineState};
 use history::{HistoryDb, HistoryRecord};
 use log::{debug, error, info, warn};
 use pipeline::Pipeline;
@@ -21,11 +21,57 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tauri_plugin_store::StoreExt;
 
 
-/// Show the transparent floating-bar window.
-/// Called when recording starts so the user gets immediate visual feedback
-/// even if the main window is minimised or hidden.
+/// Show the transparent floating-bar window, positioned at the bottom center
+/// of the monitor that currently contains the mouse cursor.
+///
+/// On multi-monitor setups this ensures the bar appears on the active screen
+/// rather than always on the primary display.
 fn show_floating_bar(app: &AppHandle) {
     if let Some(win) = app.get_webview_window("floating-bar") {
+        // Attempt to position the bar on the monitor that contains the cursor.
+        // If any step fails we fall back to just showing the window at its
+        // existing position — positioning is best-effort.
+        match (win.available_monitors(), win.cursor_position()) {
+            (Ok(monitors), Ok(cursor)) => {
+                // Find which monitor the cursor is on.
+                let target = monitors.iter().find(|m| {
+                    let pos = m.position();
+                    let size = m.size();
+                    cursor.x >= pos.x as f64
+                        && cursor.x < (pos.x + size.width as i32) as f64
+                        && cursor.y >= pos.y as f64
+                        && cursor.y < (pos.y + size.height as i32) as f64
+                });
+
+                if let Some(monitor) = target {
+                    let pos = monitor.position();
+                    let size = monitor.size();
+                    // Bar dimensions must match tauri.conf.json (460 × 60).
+                    let bar_width = 460.0_f64;
+                    let bar_height = 60.0_f64;
+                    // Center horizontally; place 40 px above the bottom edge.
+                    let x = pos.x as f64 + (size.width as f64 - bar_width) / 2.0;
+                    let y = pos.y as f64 + size.height as f64 - bar_height - 40.0;
+                    if let Err(e) = win.set_position(tauri::Position::Physical(
+                        tauri::PhysicalPosition::new(x as i32, y as i32),
+                    )) {
+                        warn!("Failed to reposition floating-bar: {e}");
+                    } else {
+                        debug!(
+                            "Floating-bar positioned at ({}, {}) on monitor \"{}\"",
+                            x as i32,
+                            y as i32,
+                            monitor.name().map_or("unknown", |v| v)
+                        );
+                    }
+                } else {
+                    debug!("Cursor not found on any monitor; keeping existing floating-bar position");
+                }
+            }
+            (Err(e), _) => warn!("Failed to enumerate monitors: {e}"),
+            (_, Err(e)) => warn!("Failed to get cursor position: {e}"),
+        }
+
         if let Err(e) = win.show() {
             warn!("Failed to show floating-bar window: {e}");
         } else {
@@ -36,9 +82,26 @@ fn show_floating_bar(app: &AppHandle) {
     }
 }
 
-/// Hide the transparent floating-bar window.
-/// Called when the pipeline returns to Idle (after injection or on error).
+/// Set the floating bar to "result" state with the injected text.
+/// The frontend will show the result card and auto-hide after 3 seconds.
+fn set_floating_result(app: &AppHandle, text: &str) {
+    let state = app.state::<FloatingState>();
+    let mut inner = state.0.lock().unwrap();
+    inner.status = "result".to_string();
+    inner.text = text.to_string();
+    debug!("FloatingState set to result with {} chars", text.len());
+}
+
+/// Reset the floating bar to idle state and hide the window.
+/// Used on error paths where we skip the result preview card.
 fn hide_floating_bar(app: &AppHandle) {
+    // Reset state so the frontend sees idle on the next poll.
+    let state = app.state::<FloatingState>();
+    {
+        let mut inner = state.0.lock().unwrap();
+        inner.status = "idle".to_string();
+        inner.text = String::new();
+    }
     if let Some(win) = app.get_webview_window("floating-bar") {
         if let Err(e) = win.hide() {
             warn!("Failed to hide floating-bar window: {e}");
@@ -188,10 +251,28 @@ pub fn register_push_to_talk_shortcut(app: &AppHandle, hotkey: &str) -> Result<(
                             })
                             .unwrap_or_default();
 
-                        // Detect the focused app and derive the appropriate tone.
+                        // Detect the focused app, derive tone, and check blacklist.
                         let app_name = context::get_frontmost_app_name();
                         let tone = context::get_tone_for_app(&app_name);
                         debug!("Context-aware tone for \"{}\": {}", app_name, tone);
+
+                        // Load custom blacklist from store (best-effort).
+                        let custom_blacklist: Vec<String> = handle2
+                            .store("config.json")
+                            .ok()
+                            .and_then(|s| {
+                                s.get("app_blacklist")
+                                    .and_then(|v| serde_json::from_value(v).ok())
+                            })
+                            .unwrap_or_default();
+                        let use_clipboard =
+                            context::is_blacklisted(&app_name, &custom_blacklist);
+                        if use_clipboard {
+                            info!(
+                                "App '{}' is blacklisted — will use clipboard paste fallback",
+                                app_name
+                            );
+                        }
 
                         // LLM polish
                         let final_text = if let Some(llm) = &llm_client {
@@ -223,11 +304,11 @@ pub fn register_push_to_talk_shortcut(app: &AppHandle, hotkey: &str) -> Result<(
                             raw_text
                         };
 
-                        // Inject text
+                        // Inject text — use clipboard paste for blacklisted apps.
                         let injection_ok;
                         match injector::TextInjector::new() {
                             Ok(mut inj) => {
-                                if let Err(e) = inj.inject(&final_text) {
+                                if let Err(e) = inj.inject_smart(&final_text, use_clipboard) {
                                     error!("Text injection failed: {e}");
                                     sound::play_error(sound_on);
                                     injection_ok = false;
@@ -280,8 +361,12 @@ pub fn register_push_to_talk_shortcut(app: &AppHandle, hotkey: &str) -> Result<(
 
                         let pipeline = state.0.lock().unwrap();
                         pipeline.set_status(pipeline::AppStatus::Idle);
-                        // Hide floating bar now that the pipeline is idle.
-                        hide_floating_bar(&handle2);
+                        // On success show the result preview card; on failure hide immediately.
+                        if injection_ok {
+                            set_floating_result(&handle2, &final_text);
+                        } else {
+                            hide_floating_bar(&handle2);
+                        }
                     });
                 }
             }
@@ -297,6 +382,7 @@ pub fn run() {
     info!("Voice Typing starting up");
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -308,6 +394,10 @@ pub fn run() {
         // CurrentHotkey is initialised with the compile-time default; the real
         // persisted value is stored here after it's read from the store in setup.
         .manage(CurrentHotkey(Mutex::new(commands::DEFAULT_HOTKEY.to_string())))
+        .manage(FloatingState(Mutex::new(FloatingStateData {
+            status: "idle".to_string(),
+            text: String::new(),
+        })))
         .invoke_handler(tauri::generate_handler![
             commands::get_status,
             commands::set_api_config,
@@ -341,6 +431,12 @@ pub fn run() {
             commands::open_system_preferences,
             commands::get_retention_days,
             commands::set_retention_days,
+            commands::get_floating_state,
+            commands::set_floating_state,
+            commands::get_blacklist,
+            commands::set_blacklist,
+            commands::check_for_update,
+            commands::install_update,
         ])
         .setup(|app| {
             // Initialize history database
@@ -722,11 +818,34 @@ pub fn run() {
                                     raw_text.clone()
                                 };
 
-                                // Inject translated text
+                                // Check blacklist for the focused app (best-effort).
+                                let trans_app_name = context::get_frontmost_app_name();
+                                let trans_custom_blacklist: Vec<String> = handle2
+                                    .store("config.json")
+                                    .ok()
+                                    .and_then(|s| {
+                                        s.get("app_blacklist")
+                                            .and_then(|v| serde_json::from_value(v).ok())
+                                    })
+                                    .unwrap_or_default();
+                                let trans_use_clipboard = context::is_blacklisted(
+                                    &trans_app_name,
+                                    &trans_custom_blacklist,
+                                );
+                                if trans_use_clipboard {
+                                    info!(
+                                        "App '{}' is blacklisted — using clipboard paste for translation",
+                                        trans_app_name
+                                    );
+                                }
+
+                                // Inject translated text — clipboard fallback for blacklisted apps.
                                 let injection_ok;
                                 match injector::TextInjector::new() {
                                     Ok(mut inj) => {
-                                        if let Err(e) = inj.inject(&translated_text) {
+                                        if let Err(e) =
+                                            inj.inject_smart(&translated_text, trans_use_clipboard)
+                                        {
                                             error!("Text injection failed (translation): {e}");
                                             sound::play_error(sound_on);
                                             injection_ok = false;
@@ -777,8 +896,12 @@ pub fn run() {
 
                                 let pipeline = state.0.lock().unwrap();
                                 pipeline.set_status(pipeline::AppStatus::Idle);
-                                // Hide floating bar now that the pipeline is idle.
-                                hide_floating_bar(&handle2);
+                                // On success show the result preview card; on failure hide immediately.
+                                if injection_ok {
+                                    set_floating_result(&handle2, &translated_text);
+                                } else {
+                                    hide_floating_bar(&handle2);
+                                }
                             });
                         }
                     }
@@ -786,6 +909,35 @@ pub fn run() {
             )?;
 
             info!("Global shortcut registered: CmdOrCtrl+Shift+T (translation mode)");
+
+            // Check for updates in the background on startup so the About tab
+            // can reflect availability without blocking the main window.
+            let update_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                use tauri_plugin_updater::UpdaterExt;
+                match update_handle.updater() {
+                    Ok(updater) => match updater.check().await {
+                        Ok(Some(update)) => {
+                            info!(
+                                "Update available on startup: v{} — {}",
+                                update.version,
+                                update.body.as_deref().unwrap_or("no release notes")
+                            );
+                        }
+                        Ok(None) => {
+                            debug!("Startup update check: already on latest version");
+                        }
+                        Err(e) => {
+                            // Non-fatal: updater may not be configured until release signing is set up.
+                            debug!("Startup update check failed (expected before release setup): {e}");
+                        }
+                    },
+                    Err(e) => {
+                        debug!("Updater not available (expected before release setup): {e}");
+                    }
+                }
+            });
+
             Ok(())
         })
         .run(tauri::generate_context!())

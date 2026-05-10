@@ -1,5 +1,46 @@
 use log::{debug, warn};
 
+/// Built-in list of applications where enigo's direct key simulation is known
+/// to behave poorly. For these apps the injector falls back to clipboard paste.
+pub const DEFAULT_BLACKLIST: &[&str] = &[
+    "Terminal",
+    "iTerm",
+    "iTerm2",
+    "Alacritty",
+    "kitty",
+    "Warp",
+    "Sublime Text",
+    "Zed",
+];
+
+/// Check whether `app_name` should use the clipboard-paste injection fallback.
+///
+/// Returns `true` when the app name contains any entry from the built-in
+/// `DEFAULT_BLACKLIST` or from the caller-supplied `custom_blacklist`.
+/// Matching is case-insensitive substring search so that, for example,
+/// `"iTerm2"` matches a blacklist entry of `"iterm"`.
+pub fn is_blacklisted(app_name: &str, custom_blacklist: &[String]) -> bool {
+    let lower = app_name.to_lowercase();
+
+    // Check built-in blacklist.
+    for entry in DEFAULT_BLACKLIST {
+        if lower.contains(&entry.to_lowercase()) {
+            debug!("App '{}' matched built-in blacklist entry '{}'", app_name, entry);
+            return true;
+        }
+    }
+
+    // Check user-defined custom blacklist.
+    for entry in custom_blacklist {
+        if !entry.is_empty() && lower.contains(&entry.to_lowercase()) {
+            debug!("App '{}' matched custom blacklist entry '{}'", app_name, entry);
+            return true;
+        }
+    }
+
+    false
+}
+
 /// Map a frontmost application name to a tone descriptor used by the LLM polishing prompt.
 ///
 /// Returns a static string describing the desired tone:
@@ -124,5 +165,43 @@ mod tests {
         assert_eq!(get_tone_for_app("Safari"), "natural, clear");
         assert_eq!(get_tone_for_app(""), "natural, clear");
         assert_eq!(get_tone_for_app("Notion"), "natural, clear");
+    }
+
+    #[test]
+    fn test_is_blacklisted_default_list() {
+        assert!(is_blacklisted("Terminal", &[]));
+        assert!(is_blacklisted("iTerm2", &[]));
+        assert!(is_blacklisted("Alacritty", &[]));
+        assert!(is_blacklisted("Warp", &[]));
+        assert!(is_blacklisted("Sublime Text", &[]));
+        assert!(is_blacklisted("Zed", &[]));
+    }
+
+    #[test]
+    fn test_is_blacklisted_case_insensitive() {
+        assert!(is_blacklisted("terminal", &[]));
+        assert!(is_blacklisted("ITERM2", &[]));
+    }
+
+    #[test]
+    fn test_is_blacklisted_not_in_list() {
+        assert!(!is_blacklisted("Safari", &[]));
+        assert!(!is_blacklisted("Slack", &[]));
+        assert!(!is_blacklisted("", &[]));
+    }
+
+    #[test]
+    fn test_is_blacklisted_custom_list() {
+        let custom = vec!["MyCustomApp".to_string(), "InternalTool".to_string()];
+        assert!(is_blacklisted("MyCustomApp", &custom));
+        assert!(is_blacklisted("internaltool", &custom)); // case-insensitive
+        assert!(!is_blacklisted("Safari", &custom));
+    }
+
+    #[test]
+    fn test_is_blacklisted_empty_custom_entries_ignored() {
+        let custom = vec!["".to_string()];
+        // Empty custom entries should not match everything.
+        assert!(!is_blacklisted("Safari", &custom));
     }
 }

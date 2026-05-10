@@ -22,7 +22,7 @@
         "label": "floating-bar",
         "title": "",
         "url": "index.html?view=floating",
-        "width": 300,
+        "width": 460,
         "height": 60,
         "decorations": false,
         "transparent": true,
@@ -48,5 +48,13 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/huywang/voice-typing/releases/latest/download/latest.json"
+      ],
+      "pubkey": ""
+    }
   }
 }

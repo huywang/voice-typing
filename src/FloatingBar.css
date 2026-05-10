@@ -100,12 +100,80 @@ body {
   to { transform: rotate(360deg); }
 }
 
+/* ── Result state ─────────────────────────────────────────── */
+/* Wider pill to accommodate text preview and action buttons. */
+.floating-bar--result {
+  background: rgba(25, 25, 25, 0.90);
+  color: #ffffff;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.40);
+  gap: 10px;
+  max-width: 420px;
+  padding: 10px 14px;
+}
+
+/* Green checkmark icon */
+.floating-result-icon {
+  color: #4caf50;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+/* Truncated injected text */
+.floating-result-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  opacity: 0.90;
+  min-width: 0;
+}
+
+/* Action buttons container */
+.floating-result-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* Shared button base */
+.floating-btn {
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  padding: 4px 10px;
+  transition: opacity 0.15s;
+}
+
+.floating-btn:hover {
+  opacity: 0.80;
+}
+
+/* Copy button — subtle accent */
+.floating-btn--copy {
+  background: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+}
+
+/* Dismiss button — minimal */
+.floating-btn--dismiss {
+  background: rgba(255, 255, 255, 0.10);
+  color: rgba(255, 255, 255, 0.70);
+  padding: 4px 8px;
+}
+
 /* ── Dark / light mode support ────────────────────────────── */
 /* The pill uses near-black bg with white text in both modes so it
    always stands out against any desktop wallpaper. */
 @media (prefers-color-scheme: light) {
   .floating-bar--recording,
-  .floating-bar--processing {
-    background: rgba(30, 30, 30, 0.85);
+  .floating-bar--processing,
+  .floating-bar--result {
+    background: rgba(30, 30, 30, 0.88);
   }
 }
