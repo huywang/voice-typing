@@ -1,9 +1,8 @@
 /* ============================================================
-   FloatingBar — Apple HIG minimal floating pill
-   Inspired by macOS Dictation indicator
+   FloatingBar — Compact voice input indicator
+   Reference: 豆包输入法 style floating pill
    ============================================================ */
 
-/* Reset body for transparent window */
 html,
 body {
   margin: 0;
@@ -13,7 +12,7 @@ body {
   -webkit-app-region: no-drag;
   user-select: none;
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue",
-    sans-serif;
+    "PingFang SC", sans-serif;
 }
 
 /* ── Pill Container ──────────────────────────────────────── */
@@ -25,7 +24,7 @@ body {
   padding: 0 14px;
   height: 32px;
   border-radius: 100px;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
   line-height: 1;
   -webkit-font-smoothing: antialiased;
@@ -36,22 +35,20 @@ body {
   margin: auto;
   width: fit-content;
 
-  /* Enter animation — subtle, no spring */
-  animation: bar-enter 0.2s ease-out;
+  animation: bar-enter 0.15s ease-out;
 }
 
 @keyframes bar-enter {
   from {
     opacity: 0;
-    transform: scale(0.95);
+    transform: translateY(4px);
   }
   to {
     opacity: 1;
-    transform: scale(1);
+    transform: translateY(0);
   }
 }
 
-/* Hidden placeholder */
 .floating-bar--hidden {
   opacity: 0;
   pointer-events: none;
@@ -59,140 +56,112 @@ body {
 
 /* ── Recording State ─────────────────────────────────────── */
 .floating-bar--recording {
-  background: rgba(0, 0, 0, 0.78);
+  background: rgba(30, 30, 30, 0.88);
   color: #ffffff;
-  backdrop-filter: blur(20px) saturate(1.8);
-  -webkit-backdrop-filter: blur(20px) saturate(1.8);
+  backdrop-filter: blur(24px) saturate(1.8);
+  -webkit-backdrop-filter: blur(24px) saturate(1.8);
   box-shadow:
-    0 4px 16px rgba(0, 0, 0, 0.2),
-    0 1px 4px rgba(0, 0, 0, 0.12);
-  border: 0.5px solid rgba(255, 255, 255, 0.08);
+    0 2px 12px rgba(0, 0, 0, 0.3),
+    0 0.5px 2px rgba(0, 0, 0, 0.15);
+  border: 0.5px solid rgba(255, 255, 255, 0.1);
 }
 
-/* Simple red dot — Apple-style restraint */
-.floating-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #ff3b30;
-  animation: dot-pulse 1.5s ease-in-out infinite;
-  flex-shrink: 0;
-}
-
-@keyframes dot-pulse {
-  0%, 100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.4;
-  }
-}
-
-/* Audio waveform — kept minimal, 3 bars only */
+/* ── Audio Waveform (right side) ─────────────────────────── */
 .floating-waveform {
   display: flex;
   align-items: center;
-  gap: 2px;
-  height: 14px;
+  gap: 2.5px;
+  height: 16px;
 }
 
 .floating-waveform-bar {
-  width: 2px;
-  border-radius: 1px;
-  background: #ff3b30;
-  animation: waveform-bounce 1.2s ease-in-out infinite;
+  width: 2.5px;
+  border-radius: 1.5px;
+  background: #ffffff;
+  animation: waveform-bounce 0.8s ease-in-out infinite;
 }
 
-.floating-waveform-bar:nth-child(1) { height: 5px; animation-delay: 0s; }
-.floating-waveform-bar:nth-child(2) { height: 10px; animation-delay: 0.1s; }
-.floating-waveform-bar:nth-child(3) { height: 14px; animation-delay: 0.2s; }
-.floating-waveform-bar:nth-child(4) { height: 8px; animation-delay: 0.3s; }
-.floating-waveform-bar:nth-child(5) { height: 6px; animation-delay: 0.15s; }
+.floating-waveform-bar:nth-child(1) { height: 6px;  animation-delay: 0s; }
+.floating-waveform-bar:nth-child(2) { height: 12px; animation-delay: 0.15s; }
+.floating-waveform-bar:nth-child(3) { height: 16px; animation-delay: 0.05s; }
+.floating-waveform-bar:nth-child(4) { height: 9px;  animation-delay: 0.25s; }
 
 @keyframes waveform-bounce {
   0%, 100% {
-    transform: scaleY(0.4);
-    opacity: 0.5;
+    transform: scaleY(0.35);
   }
   50% {
     transform: scaleY(1);
-    opacity: 1;
   }
 }
 
 /* ── Processing State ────────────────────────────────────── */
 .floating-bar--processing {
-  background: rgba(0, 0, 0, 0.78);
-  color: #ffffff;
-  backdrop-filter: blur(20px) saturate(1.8);
-  -webkit-backdrop-filter: blur(20px) saturate(1.8);
-  box-shadow:
-    0 4px 16px rgba(0, 0, 0, 0.2),
-    0 1px 4px rgba(0, 0, 0, 0.12);
-  border: 0.5px solid rgba(255, 255, 255, 0.08);
-}
-
-/* ── Processing Spinner ──────────────────────────────────── */
-.floating-spinner {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  border: 1.5px solid rgba(255, 255, 255, 0.2);
-  border-top-color: #ffffff;
-  animation: float-dot-spin 0.6s linear infinite;
-  flex-shrink: 0;
-}
-
-/* ── Label ───────────────────────────────────────────────── */
-.floating-label {
-  letter-spacing: 0.01em;
-  white-space: nowrap;
-  font-weight: 500;
-  font-size: 12px;
-}
-
-/* ── Animations ──────────────────────────────────────────── */
-@keyframes float-dot-spin {
-  to { transform: rotate(360deg); }
-}
-
-/* ── Result State ────────────────────────────────────────── */
-.floating-bar--result {
-  background: rgba(0, 0, 0, 0.82);
+  background: rgba(30, 30, 30, 0.88);
   color: #ffffff;
   backdrop-filter: blur(24px) saturate(1.8);
   -webkit-backdrop-filter: blur(24px) saturate(1.8);
   box-shadow:
-    0 4px 20px rgba(0, 0, 0, 0.25),
-    0 1px 4px rgba(0, 0, 0, 0.12);
-  border: 0.5px solid rgba(255, 255, 255, 0.08);
-  gap: 8px;
-  max-width: 280px;
-  height: auto;
-  padding: 7px 12px;
-  border-radius: 100px;
+    0 2px 12px rgba(0, 0, 0, 0.3),
+    0 0.5px 2px rgba(0, 0, 0, 0.15);
+  border: 0.5px solid rgba(255, 255, 255, 0.1);
 }
 
-/* Green checkmark */
+.floating-spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-top-color: #ffffff;
+  animation: float-spin 0.6s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes float-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Label ───────────────────────────────────────────────── */
+.floating-label {
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  font-weight: 500;
+  font-size: 13px;
+}
+
+/* ── Result State ────────────────────────────────────────── */
+.floating-bar--result {
+  background: rgba(30, 30, 30, 0.9);
+  color: #ffffff;
+  backdrop-filter: blur(24px) saturate(1.8);
+  -webkit-backdrop-filter: blur(24px) saturate(1.8);
+  box-shadow:
+    0 4px 20px rgba(0, 0, 0, 0.3),
+    0 1px 4px rgba(0, 0, 0, 0.15);
+  border: 0.5px solid rgba(255, 255, 255, 0.1);
+  gap: 8px;
+  max-width: 320px;
+  height: auto;
+  padding: 6px 12px;
+}
+
 .floating-result-icon {
   color: #34c759;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
   flex-shrink: 0;
 }
 
-/* Truncated text */
 .floating-result-text {
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 12px;
-  opacity: 0.9;
+  opacity: 0.85;
   min-width: 0;
 }
 
-/* Action buttons */
 .floating-result-actions {
   display: flex;
   gap: 3px;
@@ -211,15 +180,10 @@ body {
   transition: background 0.1s ease;
 }
 
-.floating-btn:hover {
-  transform: none;
-}
-
 .floating-btn:active {
   opacity: 0.7;
 }
 
-/* Copy button */
 .floating-btn--copy {
   background: rgba(255, 255, 255, 0.15);
   color: #ffffff;
@@ -229,7 +193,6 @@ body {
   background: rgba(255, 255, 255, 0.25);
 }
 
-/* Dismiss button */
 .floating-btn--dismiss {
   background: rgba(255, 255, 255, 0.08);
   color: rgba(255, 255, 255, 0.5);
@@ -239,13 +202,4 @@ body {
 .floating-btn--dismiss:hover {
   background: rgba(255, 255, 255, 0.15);
   color: rgba(255, 255, 255, 0.8);
-}
-
-/* ── Light mode adjustments ─────────────────────────────── */
-@media (prefers-color-scheme: light) {
-  .floating-bar--recording,
-  .floating-bar--processing,
-  .floating-bar--result {
-    background: rgba(0, 0, 0, 0.8);
-  }
 }

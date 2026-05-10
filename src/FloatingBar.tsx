@@ -14,30 +14,15 @@ const AUTO_DISMISS_MS = 3000;
 /** Maximum characters shown in the result preview before truncation. */
 const MAX_PREVIEW_CHARS = 80;
 
-/**
- * FloatingBar is rendered in the dedicated "floating-bar" Tauri window.
- * It polls the backend floating state every 200ms and switches between three
- * visible states:
- *   - recording  – red pulsing dot
- *   - processing – spinning orange ring
- *   - result     – injected text preview with Copy and Dismiss buttons
- *
- * The window is shown/hidden by lib.rs (recording start / error paths).
- * On successful injection the backend sets status="result"; the frontend is
- * then responsible for hiding the window after 3 seconds (or on Dismiss).
- */
 function FloatingBar() {
   const [floatingState, setFloatingState] = useState<FloatingStateData>({
     status: "idle",
     text: "",
   });
 
-  // Timer ref so we can cancel and restart the auto-dismiss on hover.
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Whether the mouse is currently hovering over the result card.
   const hoveringRef = useRef(false);
 
-  /** Dismiss the result card: reset backend state and hide the window. */
   const dismiss = async () => {
     if (timerRef.current) {
       clearTimeout(timerRef.current);
@@ -45,8 +30,6 @@ function FloatingBar() {
     }
     try {
       await invoke("set_floating_state", { status: "idle", text: "" });
-      // Tauri hides the window from Rust via hide_floating_bar, but since we
-      // transitioned via "result" (window stays open), we must hide it here.
       const { getCurrentWindow } = await import("@tauri-apps/api/window");
       await getCurrentWindow().hide();
     } catch {
@@ -55,7 +38,6 @@ function FloatingBar() {
     setFloatingState({ status: "idle", text: "" });
   };
 
-  /** Start the 3-second auto-dismiss timer (idempotent – clears any existing). */
   const startTimer = () => {
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => {
@@ -71,21 +53,19 @@ function FloatingBar() {
       try {
         const s = await invoke<FloatingStateData>("get_floating_state");
         setFloatingState((prev) => {
-          // When transitioning into "result", start the auto-dismiss timer.
           if (s.status === "result" && prev.status !== "result") {
             startTimer();
           }
           return s;
         });
       } catch {
-        // ignore – backend may not be ready yet
+        // ignore
       }
     }, 200);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Clean up timer on unmount.
   useEffect(() => {
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
@@ -98,7 +78,6 @@ function FloatingBar() {
   const isResult = status === "result";
 
   if (!isRecording && !isProcessing && !isResult) {
-    // Render an invisible placeholder so the window layout stays stable.
     return <div className="floating-bar floating-bar--hidden" />;
   }
 
@@ -112,31 +91,25 @@ function FloatingBar() {
       try {
         await navigator.clipboard.writeText(text);
       } catch {
-        // Fallback for environments where clipboard API is restricted.
+        // fallback
       }
       await dismiss();
-    };
-
-    const handleMouseEnter = () => {
-      hoveringRef.current = true;
-      // Pause the timer while hovering.
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-        timerRef.current = null;
-      }
-    };
-
-    const handleMouseLeave = () => {
-      hoveringRef.current = false;
-      // Restart the timer after the mouse leaves.
-      startTimer();
     };
 
     return (
       <div
         className="floating-bar floating-bar--result"
-        onMouseEnter={handleMouseEnter}
-        onMouseLeave={handleMouseLeave}
+        onMouseEnter={() => {
+          hoveringRef.current = true;
+          if (timerRef.current) {
+            clearTimeout(timerRef.current);
+            timerRef.current = null;
+          }
+        }}
+        onMouseLeave={() => {
+          hoveringRef.current = false;
+          startTimer();
+        }}
       >
         <span className="floating-result-icon">✓</span>
         <span className="floating-result-text">{preview}</span>
@@ -152,11 +125,15 @@ function FloatingBar() {
     );
   }
 
+  // Recording / Processing state
+  // Layout: label on left, waveform/spinner on right (matching reference design)
   return (
     <div className={`floating-bar floating-bar--${status}`}>
+      <span className="floating-label">
+        {isRecording ? "语音输入" : "识别中..."}
+      </span>
       {isRecording ? (
         <div className="floating-waveform">
-          <span className="floating-waveform-bar" />
           <span className="floating-waveform-bar" />
           <span className="floating-waveform-bar" />
           <span className="floating-waveform-bar" />
@@ -165,9 +142,6 @@ function FloatingBar() {
       ) : (
         <span className="floating-spinner" />
       )}
-      <span className="floating-label">
-        {isRecording ? "Listening..." : "Thinking..."}
-      </span>
     </div>
   );
 }
