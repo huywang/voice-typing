@@ -21,6 +21,50 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tauri_plugin_store::StoreExt;
 
 
+/// Raise the floating-bar NSWindow to `NSStatusWindowLevel` (25) on macOS.
+///
+/// Tauri's `set_always_on_top(true)` sets `NSFloatingWindowLevel` (3), which
+/// sits below fullscreen windows and other system-level overlays. By calling
+/// `NSWindow.setLevel` directly we ensure the bar is visible in all scenarios
+/// including full-screen apps and Mission Control.
+#[cfg(target_os = "macos")]
+fn set_ns_window_level_status(win: &tauri::WebviewWindow) {
+    use objc2_app_kit::{NSStatusWindowLevel, NSView};
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    let handle = match win.window_handle() {
+        Ok(h) => h,
+        Err(e) => {
+            warn!("Failed to get window handle for level adjustment: {e}");
+            return;
+        }
+    };
+
+    match handle.as_raw() {
+        RawWindowHandle::AppKit(appkit_handle) => {
+            // SAFETY: The pointer comes from a live Tauri WebviewWindow and is
+            // valid for the duration of this call. We only read/write on the
+            // main thread (Tauri window operations always run there).
+            unsafe {
+                let ns_view_ptr: *mut objc2::runtime::AnyObject =
+                    appkit_handle.ns_view.as_ptr().cast();
+                let ns_view: &NSView = &*(ns_view_ptr as *const NSView);
+                if let Some(ns_window) = ns_view.window() {
+                    // NSStatusWindowLevel = 25, sits above fullscreen content.
+                    let level: isize = NSStatusWindowLevel;
+                    ns_window.setLevel(level);
+                    debug!("Floating-bar NSWindow level set to NSStatusWindowLevel ({level})");
+                } else {
+                    warn!("NSView.window() returned None — could not set window level");
+                }
+            }
+        }
+        _ => {
+            warn!("Unexpected window handle type on macOS — skipping level adjustment");
+        }
+    }
+}
+
 /// Show the transparent floating-bar window, positioned at the bottom center
 /// of the monitor that currently contains the mouse cursor.
 ///
@@ -75,6 +119,19 @@ fn show_floating_bar(app: &AppHandle) {
         // Force always-on-top on every show to ensure the bar stays above
         // fullscreen apps and other windows that may have taken focus.
         let _ = win.set_always_on_top(true);
+
+        // On macOS, Tauri's set_always_on_top uses NSFloatingWindowLevel (3),
+        // which can fall behind fullscreen windows or other always-on-top
+        // windows. Elevate to NSStatusWindowLevel (25) via the raw NSWindow
+        // handle so the bar is reliably visible on all workspaces.
+        #[cfg(target_os = "macos")]
+        set_ns_window_level_status(&win);
+
+        // Show on all macOS spaces / Mission Control desktops so the bar
+        // follows the user when they switch workspaces.
+        if let Err(e) = win.set_visible_on_all_workspaces(true) {
+            warn!("Failed to set floating-bar visible on all workspaces: {e}");
+        }
 
         if let Err(e) = win.show() {
             warn!("Failed to show floating-bar window: {e}");
