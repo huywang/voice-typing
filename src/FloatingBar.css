@@ -1,0 +1,111 @@
+/* ============================================================
+   FloatingBar — transparent pill-shaped recording status indicator
+   Rendered inside the dedicated "floating-bar" Tauri window.
+   ============================================================ */
+
+/* Reset body so the transparent window background shows through */
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  overflow: hidden;
+  /* Prevent the user from accidentally dragging the transparent bar */
+  -webkit-app-region: no-drag;
+  user-select: none;
+}
+
+/* ── Pill container ───────────────────────────────────────── */
+.floating-bar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border-radius: 30px;
+  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1;
+  -webkit-font-smoothing: antialiased;
+
+  /* Centre the pill inside the transparent window */
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  width: fit-content;
+  height: fit-content;
+}
+
+/* Hidden placeholder — keeps the DOM node alive without any visual */
+.floating-bar--hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Recording state — dark semi-transparent background */
+.floating-bar--recording {
+  background: rgba(20, 20, 20, 0.82);
+  color: #ffffff;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+}
+
+/* Processing state */
+.floating-bar--processing {
+  background: rgba(20, 20, 20, 0.78);
+  color: #ffffff;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.30);
+}
+
+/* ── Status dot ───────────────────────────────────────────── */
+.floating-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* Pulsing red dot for recording */
+.floating-dot--recording {
+  background: #f44336;
+  animation: dot-pulse 1s ease-in-out infinite;
+}
+
+/* Spinning orange ring for processing */
+.floating-dot--processing {
+  background: transparent;
+  border: 2px solid #ff9800;
+  border-top-color: transparent;
+  animation: dot-spin 0.7s linear infinite;
+}
+
+/* ── Label ────────────────────────────────────────────────── */
+.floating-label {
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+/* ── Animations ───────────────────────────────────────────── */
+@keyframes dot-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.85); }
+}
+
+@keyframes dot-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Dark / light mode support ────────────────────────────── */
+/* The pill uses near-black bg with white text in both modes so it
+   always stands out against any desktop wallpaper. */
+@media (prefers-color-scheme: light) {
+  .floating-bar--recording,
+  .floating-bar--processing {
+    background: rgba(30, 30, 30, 0.85);
+  }
+}

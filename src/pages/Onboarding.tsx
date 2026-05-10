@@ -1,5 +1,11 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
+
+// Permission status returned by the backend check_permissions command.
+interface PermissionStatus {
+  microphone: boolean;
+  accessibility: boolean;
+}
 
 interface OnboardingProps {
   /** Called when the user finishes the onboarding flow. */
@@ -30,32 +36,74 @@ function StepWelcome() {
   );
 }
 
-function StepPermissions() {
+interface StepPermissionsProps {
+  permissions: PermissionStatus;
+  onOpenSettings: (pane: string) => void;
+}
+
+function StepPermissions({ permissions, onOpenSettings }: StepPermissionsProps) {
   return (
     <div className="onboarding-step">
       <div className="onboarding-icon">🔐</div>
       <h2>Required Permissions</h2>
       <p>
-        Voice Typing needs two macOS permissions to function. You may be prompted
-        to grant them the first time you use the app.
+        Voice Typing needs two macOS permissions to function. Grant them below,
+        then continue.
       </p>
 
       <div className="onboarding-permission-card">
         <div className="permission-title">🎤 Microphone Access</div>
         <div className="permission-desc">
-          Needed to capture your speech. macOS will show a permission dialog
-          when you first press the hotkey.
+          Needed to capture your speech.
+        </div>
+        <div className="permission-status-row">
+          <span
+            className={`permission-dot ${permissions.microphone ? "permission-dot--granted" : "permission-dot--denied"}`}
+            aria-label={permissions.microphone ? "Granted" : "Not granted"}
+          />
+          <span className={`permission-badge ${permissions.microphone ? "permission-badge--granted" : "permission-badge--denied"}`}>
+            {permissions.microphone ? "Granted" : "Not Granted"}
+          </span>
+          {!permissions.microphone && (
+            <button
+              type="button"
+              className="permission-open-btn"
+              onClick={() => onOpenSettings("microphone")}
+            >
+              Open Settings
+            </button>
+          )}
         </div>
       </div>
 
       <div className="onboarding-permission-card">
         <div className="permission-title">♿ Accessibility Access</div>
         <div className="permission-desc">
-          Needed to inject typed text into other apps. Go to{" "}
-          <strong>System Settings → Privacy &amp; Security → Accessibility</strong>{" "}
-          and enable Voice Typing.
+          Needed to inject typed text into other apps.
+        </div>
+        <div className="permission-status-row">
+          <span
+            className={`permission-dot ${permissions.accessibility ? "permission-dot--granted" : "permission-dot--denied"}`}
+            aria-label={permissions.accessibility ? "Granted" : "Not granted"}
+          />
+          <span className={`permission-badge ${permissions.accessibility ? "permission-badge--granted" : "permission-badge--denied"}`}>
+            {permissions.accessibility ? "Granted" : "Not Granted"}
+          </span>
+          {!permissions.accessibility && (
+            <button
+              type="button"
+              className="permission-open-btn"
+              onClick={() => onOpenSettings("accessibility")}
+            >
+              Open Settings
+            </button>
+          )}
         </div>
       </div>
+
+      <p className="form-hint" style={{ marginTop: 8 }}>
+        Status refreshes automatically every 5 seconds.
+      </p>
     </div>
   );
 }
@@ -191,6 +239,35 @@ function Onboarding({ onComplete }: OnboardingProps) {
   const [saving, setSaving] = useState(false);
   const [apiError, setApiError] = useState("");
 
+  // Permission status — polled every 5 seconds while on the permissions step.
+  const [permissions, setPermissions] = useState<PermissionStatus>({
+    microphone: false,
+    accessibility: false,
+  });
+
+  useEffect(() => {
+    const fetchPermissions = () => {
+      invoke<PermissionStatus>("check_permissions")
+        .then((status) => setPermissions(status))
+        .catch(() => {
+          // Non-fatal: keep defaults.
+        });
+    };
+
+    fetchPermissions();
+    const interval = setInterval(fetchPermissions, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Open a macOS System Settings pane for the given permission.
+  const handleOpenSettings = async (pane: string) => {
+    try {
+      await invoke("open_system_preferences", { pane });
+    } catch (e) {
+      console.error("Failed to open system preferences:", e);
+    }
+  };
+
   const isLastStep = step === TOTAL_STEPS - 1;
   const isApiStep = step === 2;
 
@@ -244,7 +321,12 @@ function Onboarding({ onComplete }: OnboardingProps) {
       case 0:
         return <StepWelcome />;
       case 1:
-        return <StepPermissions />;
+        return (
+          <StepPermissions
+            permissions={permissions}
+            onOpenSettings={handleOpenSettings}
+          />
+        );
       case 2:
         return (
           <StepApiKey

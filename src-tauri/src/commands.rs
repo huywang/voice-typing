@@ -6,6 +6,7 @@ use std::sync::Mutex;
 use std::time::Instant;
 use tauri::{AppHandle, State};
 use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
+use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use tauri_plugin_store::StoreExt;
 
 use crate::asr::{AsrClient, AsrError};
@@ -18,6 +19,12 @@ pub struct HistoryState(pub HistoryDb);
 
 /// Shared pipeline state managed by Tauri.
 pub struct PipelineState(pub Mutex<Pipeline>);
+
+/// Managed state holding the currently active push-to-talk hotkey string.
+///
+/// Protected by a `Mutex` so `set_hotkey` can atomically swap the old hotkey
+/// for the new one while preventing concurrent re-registration races.
+pub struct CurrentHotkey(pub Mutex<String>);
 
 /// Get the current application status.
 #[tauri::command]
@@ -147,10 +154,15 @@ pub async fn stop_and_process(
         info!("Personal dictionary loaded: {} term(s)", dictionary.len());
     }
 
+    // Detect the focused app and derive the appropriate tone for polishing.
+    let app_name = crate::context::get_frontmost_app_name();
+    let tone = crate::context::get_tone_for_app(&app_name);
+    debug!("Context-aware tone for \"{}\": {}", app_name, tone);
+
     // LLM polishing (with fallback)
     let final_text = if let Some(llm) = &llm_client {
         let llm_start = Instant::now();
-        match llm.polish(&raw_text, &dictionary).await {
+        match llm.polish(&raw_text, &dictionary, tone).await {
             Ok(polished) => {
                 info!(
                     "LLM polished in {:.1}s: \"{}\"",
@@ -668,12 +680,199 @@ pub async fn test_api_key(api_key: String) -> Result<String, String> {
     }
 }
 
-/// Persist the push-to-talk hotkey string to the store.
+/// Permission status for microphone and accessibility.
+#[derive(Debug, Serialize)]
+pub struct PermissionStatus {
+    /// Whether microphone access is granted.
+    pub microphone: bool,
+    /// Whether accessibility access is granted.
+    pub accessibility: bool,
+}
+
+/// Check whether microphone access is available.
 ///
-/// The new hotkey takes effect after the next application restart.
+/// On macOS, we probe the default input device via cpal as a lightweight
+/// proxy for permission status. If cpal can enumerate a device, the OS has
+/// granted (or not yet blocked) microphone access.
+fn check_microphone_permission() -> bool {
+    let host = cpal::default_host();
+    let has_device = host.default_input_device().is_some();
+    debug!("check_microphone_permission: has_device={has_device}");
+    has_device
+}
+
+/// Check whether accessibility access is granted (macOS only).
+///
+/// Runs a trivial AppleScript via `osascript`. If accessibility is not
+/// granted, System Events will deny the request and the command will fail.
+fn check_accessibility_permission() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        let result = std::process::Command::new("osascript")
+            .arg("-e")
+            .arg("tell application \"System Events\" to return true")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        debug!("check_accessibility_permission: {result}");
+        result
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        true
+    }
+}
+
+/// Return the current microphone and accessibility permission status.
 #[tauri::command]
-pub fn set_hotkey(app: AppHandle, hotkey: String) -> Result<(), String> {
-    info!("set_hotkey: {hotkey}");
+pub fn check_permissions() -> PermissionStatus {
+    let status = PermissionStatus {
+        microphone: check_microphone_permission(),
+        accessibility: check_accessibility_permission(),
+    };
+    info!(
+        "check_permissions: microphone={}, accessibility={}",
+        status.microphone, status.accessibility
+    );
+    status
+}
+
+/// Open a specific macOS System Preferences / System Settings pane.
+///
+/// `pane` can be `"microphone"` or `"accessibility"`.
+/// On non-macOS platforms this is a no-op (returns Ok).
+#[tauri::command]
+pub fn open_system_preferences(pane: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let url = match pane.as_str() {
+            "microphone" => {
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"
+            }
+            "accessibility" => {
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+            }
+            other => {
+                warn!("open_system_preferences: unknown pane '{other}'");
+                return Err(format!("Unknown pane: {other}"));
+            }
+        };
+        info!("open_system_preferences: opening pane '{pane}' → {url}");
+        std::process::Command::new("open")
+            .arg(url)
+            .spawn()
+            .map_err(|e| {
+                error!("Failed to open system preferences: {e}");
+                format!("Failed to open system preferences: {e}")
+            })?;
+        Ok(())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        debug!("open_system_preferences: no-op on non-macOS (pane={pane})");
+        Ok(())
+    }
+}
+
+/// Get the history retention period in days from the store.
+///
+/// Returns -1 to indicate "forever" (no cleanup). Default is -1.
+#[tauri::command]
+pub fn get_retention_days(app: AppHandle) -> i32 {
+    let days = app
+        .store("config.json")
+        .ok()
+        .and_then(|s| s.get("retention_days"))
+        .and_then(|v| v.as_i64())
+        .map(|v| v as i32)
+        .unwrap_or(-1);
+    debug!("get_retention_days: {days}");
+    days
+}
+
+/// Set the history retention period in days and persist to store.
+///
+/// Use -1 to disable cleanup (retain forever).
+#[tauri::command]
+pub fn set_retention_days(app: AppHandle, days: i32) -> Result<(), String> {
+    info!("set_retention_days: {days}");
+    match app.store("config.json") {
+        Ok(store) => {
+            store.set("retention_days", serde_json::json!(days));
+            if let Err(e) = store.save() {
+                error!("Failed to save retention_days: {e}");
+                return Err(format!("Failed to save retention_days: {e}"));
+            }
+            info!("retention_days persisted: {days}");
+            Ok(())
+        }
+        Err(e) => {
+            error!("Failed to open config store for retention_days: {e}");
+            Err(format!("Failed to open config store: {e}"))
+        }
+    }
+}
+
+/// Persist the push-to-talk hotkey and live-reload it without requiring a restart.
+///
+/// Steps:
+/// 1. Acquire the `CurrentHotkey` mutex to prevent concurrent re-registration.
+/// 2. Unregister the old shortcut.
+/// 3. Register the new shortcut via [`crate::register_push_to_talk_shortcut`].
+/// 4. If registration fails, attempt to restore the old shortcut so the app
+///    remains functional.
+/// 5. Persist the new hotkey to the config store.
+#[tauri::command]
+pub fn set_hotkey(
+    app: AppHandle,
+    current_hotkey: State<CurrentHotkey>,
+    hotkey: String,
+) -> Result<(), String> {
+    let hotkey = hotkey.trim().to_string();
+    if hotkey.is_empty() {
+        return Err("Hotkey cannot be empty".to_string());
+    }
+
+    info!("set_hotkey: changing hotkey to '{hotkey}'");
+
+    // Hold the lock for the entire operation so concurrent calls are serialised.
+    let mut current = current_hotkey.0.lock().unwrap();
+    let old_hotkey = current.clone();
+
+    if old_hotkey == hotkey {
+        info!("set_hotkey: hotkey unchanged, nothing to do");
+        return Ok(());
+    }
+
+    // Unregister the old push-to-talk shortcut.
+    if let Err(e) = app.global_shortcut().unregister(old_hotkey.as_str()) {
+        // Non-fatal: the old hotkey may already be gone (e.g. on first run with
+        // a default that was never explicitly registered through this path).
+        warn!("set_hotkey: failed to unregister old hotkey '{old_hotkey}': {e}");
+    } else {
+        info!("set_hotkey: unregistered old hotkey '{old_hotkey}'");
+    }
+
+    // Attempt to register the new hotkey.
+    if let Err(e) = crate::register_push_to_talk_shortcut(&app, &hotkey) {
+        error!("set_hotkey: failed to register new hotkey '{hotkey}': {e}");
+
+        // Rollback: try to restore the old hotkey so the app stays functional.
+        if let Err(re) = crate::register_push_to_talk_shortcut(&app, &old_hotkey) {
+            error!("set_hotkey: rollback also failed, old hotkey '{old_hotkey}' is unregistered: {re}");
+        } else {
+            info!("set_hotkey: rolled back to old hotkey '{old_hotkey}'");
+        }
+
+        return Err(format!(
+            "Invalid hotkey '{hotkey}' — could not register it: {e}"
+        ));
+    }
+
+    info!("set_hotkey: registered new hotkey '{hotkey}'");
+    *current = hotkey.clone();
+
+    // Persist the new hotkey so it survives restarts.
     match app.store("config.json") {
         Ok(store) => {
             store.set("push_to_talk_hotkey", serde_json::json!(hotkey));
@@ -682,11 +881,12 @@ pub fn set_hotkey(app: AppHandle, hotkey: String) -> Result<(), String> {
                 return Err(format!("Failed to save hotkey: {e}"));
             }
             info!("push_to_talk_hotkey persisted: {hotkey}");
-            Ok(())
         }
         Err(e) => {
             error!("Failed to open config store for push_to_talk_hotkey: {e}");
-            Err(format!("Failed to open config store: {e}"))
+            return Err(format!("Failed to open config store: {e}"));
         }
     }
+
+    Ok(())
 }

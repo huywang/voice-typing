@@ -10,6 +10,12 @@ interface AudioDeviceInfo {
   is_default: boolean;
 }
 
+// Permission status returned by the backend check_permissions command.
+interface PermissionStatus {
+  microphone: boolean;
+  accessibility: boolean;
+}
+
 // Available tab identifiers
 type Tab = "general" | "ai" | "shortcuts" | "about";
 
@@ -37,6 +43,9 @@ function Settings({ onBack }: SettingsProps) {
   const [dockVisible, setDockVisible] = useState(true);
   const [isMacos, setIsMacos] = useState(false);
 
+  // History retention period in days; -1 means forever
+  const [retentionDays, setRetentionDays] = useState<number>(-1);
+
   // Microphone device selection state
   const [audioDevices, setAudioDevices] = useState<AudioDeviceInfo[]>([]);
   const [selectedDevice, setSelectedDevice] = useState<string | null>(null);
@@ -61,6 +70,12 @@ function Settings({ onBack }: SettingsProps) {
   // Personal dictionary state
   const [dictionary, setDictionary] = useState<string[]>([]);
   const [newTerm, setNewTerm] = useState("");
+
+  // Permission status (microphone + accessibility)
+  const [permissions, setPermissions] = useState<PermissionStatus>({
+    microphone: false,
+    accessibility: false,
+  });
 
   // Per-field inline save status map
   const [fieldStatus, setFieldStatus] = useState<Record<string, FieldStatus>>({});
@@ -90,6 +105,22 @@ function Settings({ onBack }: SettingsProps) {
     return () => {
       Object.values(timers).forEach(clearTimeout);
     };
+  }, []);
+
+  // Poll permission status on mount and every 5 seconds so the indicators
+  // update automatically after the user grants access in System Settings.
+  useEffect(() => {
+    const fetchPermissions = () => {
+      invoke<PermissionStatus>("check_permissions")
+        .then((status) => setPermissions(status))
+        .catch(() => {
+          // Non-fatal: keep defaults (both false).
+        });
+    };
+
+    fetchPermissions();
+    const interval = setInterval(fetchPermissions, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   // Load persisted toggles when the settings page mounts.
@@ -149,6 +180,13 @@ function Settings({ onBack }: SettingsProps) {
       .then((lang) => setTranslationTarget(lang))
       .catch(() => {
         // Non-fatal: keep the default "English".
+      });
+
+    // Load persisted history retention period (-1 = forever).
+    invoke<number>("get_retention_days")
+      .then((days) => setRetentionDays(days))
+      .catch(() => {
+        // Non-fatal: keep the default of -1 (forever).
       });
 
     // API key is write-only for security; field intentionally starts empty on
@@ -212,6 +250,25 @@ function Settings({ onBack }: SettingsProps) {
     }
   };
 
+  // Open a specific macOS System Settings pane.
+  const handleOpenSystemPreferences = async (pane: string) => {
+    try {
+      await invoke("open_system_preferences", { pane });
+    } catch (e) {
+      console.error("Failed to open system preferences:", e);
+    }
+  };
+
+  const handleRetentionChange = async (days: number) => {
+    setRetentionDays(days);
+    try {
+      await invoke("set_retention_days", { days });
+      setStatus("retention", "saved");
+    } catch {
+      setStatus("retention", "error");
+    }
+  };
+
   // --- Blur-save handlers for text fields ---
 
   const handleApiKeyBlur = async () => {
@@ -261,7 +318,7 @@ function Settings({ onBack }: SettingsProps) {
     }
   };
 
-  // --- Hotkey save (requires explicit Apply button + restart) ---
+  // --- Hotkey save — applies immediately without restart ---
   const handleSaveHotkey = async () => {
     const trimmed = hotkey.trim();
     if (!trimmed) {
@@ -474,6 +531,75 @@ function Settings({ onBack }: SettingsProps) {
                 </p>
               </div>
             )}
+            <div className="form-group">
+              <label htmlFor="retention">
+                History retention
+                {renderFieldStatus("retention")}
+              </label>
+              <select
+                id="retention"
+                value={retentionDays}
+                onChange={(e) => handleRetentionChange(Number(e.target.value))}
+              >
+                <option value={-1}>Forever</option>
+                <option value={7}>7 days</option>
+                <option value={30}>30 days</option>
+                <option value={90}>90 days</option>
+              </select>
+              <p className="form-hint">
+                Automatically delete transcription history older than the
+                selected period. Cleanup runs on app startup.
+              </p>
+            </div>
+
+            {/* Permissions section — macOS microphone + accessibility status */}
+            {isMacos && (
+              <div className="form-group">
+                <label>Permissions</label>
+                <div className="permission-row">
+                  <span
+                    className={`permission-dot ${permissions.microphone ? "permission-dot--granted" : "permission-dot--denied"}`}
+                    aria-label={permissions.microphone ? "Granted" : "Not granted"}
+                  />
+                  <span className="permission-name">Microphone</span>
+                  <span className={`permission-badge ${permissions.microphone ? "permission-badge--granted" : "permission-badge--denied"}`}>
+                    {permissions.microphone ? "Granted" : "Not Granted"}
+                  </span>
+                  {!permissions.microphone && (
+                    <button
+                      type="button"
+                      className="permission-open-btn"
+                      onClick={() => handleOpenSystemPreferences("microphone")}
+                    >
+                      Open Settings
+                    </button>
+                  )}
+                </div>
+                <div className="permission-row">
+                  <span
+                    className={`permission-dot ${permissions.accessibility ? "permission-dot--granted" : "permission-dot--denied"}`}
+                    aria-label={permissions.accessibility ? "Granted" : "Not granted"}
+                  />
+                  <span className="permission-name">Accessibility</span>
+                  <span className={`permission-badge ${permissions.accessibility ? "permission-badge--granted" : "permission-badge--denied"}`}>
+                    {permissions.accessibility ? "Granted" : "Not Granted"}
+                  </span>
+                  {!permissions.accessibility && (
+                    <button
+                      type="button"
+                      className="permission-open-btn"
+                      onClick={() => handleOpenSystemPreferences("accessibility")}
+                    >
+                      Open Settings
+                    </button>
+                  )}
+                </div>
+                <p className="form-hint">
+                  Microphone is required for recording. Accessibility is required
+                  for text injection. Status refreshes every 5 seconds.
+                </p>
+              </div>
+            )}
           </div>
         )}
 
@@ -580,7 +706,7 @@ function Settings({ onBack }: SettingsProps) {
               ))}
             </div>
 
-            {/* Editable push-to-talk hotkey — requires explicit Apply + restart */}
+            {/* Editable push-to-talk hotkey — takes effect immediately on Apply */}
             <div className="form-group" style={{ marginTop: "20px" }}>
               <label htmlFor="hotkey">Push-to-Talk Hotkey (custom)</label>
               <div className="dictionary-input-row">
@@ -610,13 +736,13 @@ function Settings({ onBack }: SettingsProps) {
                   className="form-hint"
                   style={{ color: "var(--status-idle)" }}
                 >
-                  Hotkey saved. Changes take effect after restart.
+                  Hotkey applied — now active.
                 </p>
               )}
               {!hotkeyError && !hotkeySaved && (
                 <p className="form-hint">
                   Type a combination (e.g. <code>CmdOrCtrl+Alt+Space</code>).
-                  Takes effect after restart.
+                  Click Apply to activate immediately.
                 </p>
               )}
             </div>

@@ -10,15 +10,284 @@ mod sound;
 mod tray;
 
 use chrono::Utc;
-use commands::{HistoryState, PipelineState};
+use commands::{CurrentHotkey, HistoryState, PipelineState};
 use history::{HistoryDb, HistoryRecord};
 use log::{debug, error, info, warn};
 use pipeline::Pipeline;
 use std::sync::Mutex;
 use std::time::Instant;
-use tauri::Manager;
+use tauri::{AppHandle, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tauri_plugin_store::StoreExt;
+
+
+/// Show the transparent floating-bar window.
+/// Called when recording starts so the user gets immediate visual feedback
+/// even if the main window is minimised or hidden.
+fn show_floating_bar(app: &AppHandle) {
+    if let Some(win) = app.get_webview_window("floating-bar") {
+        if let Err(e) = win.show() {
+            warn!("Failed to show floating-bar window: {e}");
+        } else {
+            debug!("Floating-bar window shown");
+        }
+    } else {
+        warn!("floating-bar window not found");
+    }
+}
+
+/// Hide the transparent floating-bar window.
+/// Called when the pipeline returns to Idle (after injection or on error).
+fn hide_floating_bar(app: &AppHandle) {
+    if let Some(win) = app.get_webview_window("floating-bar") {
+        if let Err(e) = win.hide() {
+            warn!("Failed to hide floating-bar window: {e}");
+        } else {
+            debug!("Floating-bar window hidden");
+        }
+    } else {
+        warn!("floating-bar window not found");
+    }
+}
+
+/// Register the push-to-talk shortcut with the given hotkey string.
+///
+/// The handler captures an `AppHandle` so it can access managed state and the
+/// config store at runtime without holding any lock across await points.
+/// This function is also called by [`commands::set_hotkey`] for live re-registration.
+pub fn register_push_to_talk_shortcut(app: &AppHandle, hotkey: &str) -> Result<(), String> {
+    let handle = app.clone();
+    app.global_shortcut()
+        .on_shortcut(hotkey, move |_app, _shortcut, event| {
+            // Read sound_enabled from store on every event so Settings
+            // changes are picked up without a restart.
+            let sound_on = handle
+                .store("config.json")
+                .ok()
+                .and_then(|s| s.get("sound_enabled"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
+
+            let state = handle.state::<PipelineState>();
+            match event.state {
+                ShortcutState::Pressed => {
+                    info!("Hotkey pressed — starting recording");
+                    let mut pipeline = state.0.lock().unwrap();
+                    if let Err(e) = pipeline.start_recording() {
+                        error!("Failed to start recording: {e}");
+                        sound::play_error(sound_on);
+                    } else {
+                        sound::play_start(sound_on);
+                        // Show floating bar so user sees recording status immediately.
+                        show_floating_bar(&handle);
+                    }
+                }
+                ShortcutState::Released => {
+                    info!("Hotkey released — stopping recording and processing");
+                    let handle2 = handle.clone();
+                    tauri::async_runtime::spawn(async move {
+                        // Re-read inside the async task (store reads are cheap).
+                        let sound_on = handle2
+                            .store("config.json")
+                            .ok()
+                            .and_then(|s| s.get("sound_enabled"))
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(true);
+
+                        let pipeline_start = Instant::now();
+                        let state = handle2.state::<PipelineState>();
+
+                        // Extract data under lock, drop lock, then do async work.
+                        let (wav_result, asr_client, llm_client) = {
+                            let pipeline = state.0.lock().unwrap();
+                            let audio = match pipeline.audio_thread_ref() {
+                                Some(a) => a,
+                                None => {
+                                    error!(
+                                        "Audio not initialized — did you configure API key?"
+                                    );
+                                    sound::play_error(sound_on);
+                                    hide_floating_bar(&handle2);
+                                    return;
+                                }
+                            };
+                            audio.buffer().stop();
+                            pipeline.set_status(pipeline::AppStatus::Processing);
+                            // get_wav_data handles mono mixing + resampling to 16kHz
+                            let wav = audio.buffer().get_wav_data();
+                            (
+                                wav,
+                                pipeline.asr_client().cloned(),
+                                pipeline.llm_client().cloned(),
+                            )
+                        };
+
+                        let wav_data = match wav_result {
+                            Ok(d) => {
+                                let duration_secs = d.len() as f64 / (16000.0 * 2.0); // 16kHz, 16-bit mono
+                                info!(
+                                    "WAV encoded: {} bytes (~{:.1}s audio)",
+                                    d.len(),
+                                    duration_secs
+                                );
+                                d
+                            }
+                            Err(e) => {
+                                warn!("WAV encoding failed: {e}");
+                                sound::play_error(sound_on);
+                                let pipeline = state.0.lock().unwrap();
+                                pipeline.set_status(pipeline::AppStatus::Idle);
+                                hide_floating_bar(&handle2);
+                                return;
+                            }
+                        };
+
+                        // ASR
+                        let asr = match asr_client {
+                            Some(a) => a,
+                            None => {
+                                warn!("ASR not configured — please set API key in settings");
+                                sound::play_error(sound_on);
+                                let pipeline = state.0.lock().unwrap();
+                                pipeline.set_status(pipeline::AppStatus::Idle);
+                                hide_floating_bar(&handle2);
+                                return;
+                            }
+                        };
+
+                        let asr_start = Instant::now();
+                        let raw_text = match asr.recognize(&wav_data).await {
+                            Ok(t) => {
+                                info!(
+                                    "ASR completed in {:.1}s: \"{}\"",
+                                    asr_start.elapsed().as_secs_f64(),
+                                    t
+                                );
+                                t
+                            }
+                            Err(e) => {
+                                error!("ASR failed: {e}");
+                                sound::play_error(sound_on);
+                                let pipeline = state.0.lock().unwrap();
+                                pipeline.set_status(pipeline::AppStatus::Idle);
+                                hide_floating_bar(&handle2);
+                                return;
+                            }
+                        };
+
+                        // Keep raw text for history before LLM may consume it.
+                        let raw_text_for_history = raw_text.clone();
+
+                        // Load personal dictionary (best-effort; empty on failure).
+                        let dictionary: Vec<String> = handle2
+                            .store("config.json")
+                            .ok()
+                            .and_then(|s| {
+                                s.get("dictionary")
+                                    .and_then(|v| serde_json::from_value(v).ok())
+                            })
+                            .unwrap_or_default();
+
+                        // Detect the focused app and derive the appropriate tone.
+                        let app_name = context::get_frontmost_app_name();
+                        let tone = context::get_tone_for_app(&app_name);
+                        debug!("Context-aware tone for \"{}\": {}", app_name, tone);
+
+                        // LLM polish
+                        let final_text = if let Some(llm) = &llm_client {
+                            let llm_start = Instant::now();
+                            match llm.polish(&raw_text, &dictionary, tone).await {
+                                Ok(p) => {
+                                    if p != raw_text {
+                                        info!(
+                                            "LLM polished in {:.1}s: \"{}\" -> \"{}\"",
+                                            llm_start.elapsed().as_secs_f64(),
+                                            raw_text,
+                                            p
+                                        );
+                                    } else {
+                                        info!(
+                                            "LLM returned unchanged text in {:.1}s",
+                                            llm_start.elapsed().as_secs_f64()
+                                        );
+                                    }
+                                    p
+                                }
+                                Err(e) => {
+                                    warn!("LLM polish failed (using raw text): {e}");
+                                    raw_text
+                                }
+                            }
+                        } else {
+                            debug!("LLM disabled, skipping polish");
+                            raw_text
+                        };
+
+                        // Inject text
+                        let injection_ok;
+                        match injector::TextInjector::new() {
+                            Ok(mut inj) => {
+                                if let Err(e) = inj.inject(&final_text) {
+                                    error!("Text injection failed: {e}");
+                                    sound::play_error(sound_on);
+                                    injection_ok = false;
+                                } else {
+                                    info!(
+                                        "Text injected successfully ({} chars)",
+                                        final_text.len()
+                                    );
+                                    // Play stop sound on successful injection.
+                                    sound::play_stop(sound_on);
+                                    // Cache raw and polished text for re-inject / AI-revert shortcuts.
+                                    let pipeline = state.0.lock().unwrap();
+                                    pipeline.set_last_transcription(
+                                        raw_text_for_history.clone(),
+                                        final_text.clone(),
+                                    );
+                                    injection_ok = true;
+                                }
+                            }
+                            Err(e) => {
+                                error!("Failed to init injector: {e}");
+                                sound::play_error(sound_on);
+                                injection_ok = false;
+                            }
+                        }
+
+                        // Save to history after successful injection.
+                        if injection_ok {
+                            let duration_secs = wav_data.len() as f64 / (16000.0 * 2.0);
+                            let history_state = handle2.state::<HistoryState>();
+                            let record = HistoryRecord {
+                                id: 0,
+                                timestamp: Utc::now().to_rfc3339(),
+                                raw_text: raw_text_for_history,
+                                polished_text: final_text.clone(),
+                                duration_secs,
+                                app_name: context::get_frontmost_app_name(),
+                            };
+                            if let Err(e) = history_state.0.insert(&record) {
+                                error!("Failed to save history record: {e}");
+                            } else {
+                                info!("History record saved");
+                            }
+                        }
+
+                        info!(
+                            "Pipeline completed in {:.1}s",
+                            pipeline_start.elapsed().as_secs_f64()
+                        );
+
+                        let pipeline = state.0.lock().unwrap();
+                        pipeline.set_status(pipeline::AppStatus::Idle);
+                        // Hide floating bar now that the pipeline is idle.
+                        hide_floating_bar(&handle2);
+                    });
+                }
+            }
+        })
+        .map_err(|e| format!("Failed to register hotkey '{hotkey}': {e}"))
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -36,6 +305,9 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(PipelineState(Mutex::new(Pipeline::new())))
+        // CurrentHotkey is initialised with the compile-time default; the real
+        // persisted value is stored here after it's read from the store in setup.
+        .manage(CurrentHotkey(Mutex::new(commands::DEFAULT_HOTKEY.to_string())))
         .invoke_handler(tauri::generate_handler![
             commands::get_status,
             commands::set_api_config,
@@ -65,6 +337,10 @@ pub fn run() {
             commands::test_api_key,
             commands::delete_history_item,
             commands::reinject_history_item,
+            commands::check_permissions,
+            commands::open_system_preferences,
+            commands::get_retention_days,
+            commands::set_retention_days,
         ])
         .setup(|app| {
             // Initialize history database
@@ -76,6 +352,30 @@ pub fn run() {
                 .map_err(|e| format!("Failed to create app data dir: {e}"))?;
             let history_db = HistoryDb::init(&app_data_dir)
                 .map_err(|e| format!("Failed to init history DB: {e}"))?;
+
+            // Run retention cleanup before making the DB available to the rest of the app.
+            let retention_days: i32 = app
+                .store("config.json")
+                .ok()
+                .and_then(|s| s.get("retention_days"))
+                .and_then(|v| v.as_i64())
+                .map(|v| v as i32)
+                .unwrap_or(-1);
+            if retention_days > 0 {
+                match history_db.cleanup_older_than(retention_days as u32) {
+                    Ok(count) => {
+                        if count > 0 {
+                            info!("Auto-cleanup removed {count} history record(s) older than {retention_days} days");
+                        } else {
+                            debug!("Auto-cleanup: no history records older than {retention_days} days");
+                        }
+                    }
+                    Err(e) => warn!("Auto-cleanup failed: {e}"),
+                }
+            } else {
+                debug!("History retention set to forever — skipping auto-cleanup");
+            }
+
             app.manage(HistoryState(history_db));
             info!("History database ready");
 
@@ -177,227 +477,17 @@ pub fn run() {
                 .unwrap_or_else(|| commands::DEFAULT_HOTKEY.to_string());
             info!("Registering push-to-talk hotkey: {push_to_talk_hotkey}");
 
-            // Global hotkey: configurable push-to-talk (default CmdOrCtrl+Shift+Space)
-            let handle = app.handle().clone();
-            app.global_shortcut().on_shortcut(
-                push_to_talk_hotkey.as_str(),
-                move |_app, _shortcut, event| {
-                    // Read sound_enabled from store on every event so Settings
-                    // changes are picked up without a restart.
-                    let sound_on = handle
-                        .store("config.json")
-                        .ok()
-                        .and_then(|s| s.get("sound_enabled"))
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(true);
+            // Register PTT shortcut via the shared helper so it can also be called
+            // from set_hotkey for live re-registration without a restart.
+            register_push_to_talk_shortcut(app.handle(), &push_to_talk_hotkey)?;
 
-                    let state = handle.state::<PipelineState>();
-                    match event.state {
-                        ShortcutState::Pressed => {
-                            info!("Hotkey pressed — starting recording");
-                            let mut pipeline = state.0.lock().unwrap();
-                            if let Err(e) = pipeline.start_recording() {
-                                error!("Failed to start recording: {e}");
-                                sound::play_error(sound_on);
-                            } else {
-                                sound::play_start(sound_on);
-                            }
-                        }
-                        ShortcutState::Released => {
-                            info!("Hotkey released — stopping recording and processing");
-                            let handle2 = handle.clone();
-                            tauri::async_runtime::spawn(async move {
-                                // Re-read inside the async task (store reads are cheap).
-                                let sound_on = handle2
-                                    .store("config.json")
-                                    .ok()
-                                    .and_then(|s| s.get("sound_enabled"))
-                                    .and_then(|v| v.as_bool())
-                                    .unwrap_or(true);
-
-                                let pipeline_start = Instant::now();
-                                let state = handle2.state::<PipelineState>();
-
-                                // Extract data under lock, drop lock, then do async work
-                                let (wav_result, asr_client, llm_client) = {
-                                    let pipeline = state.0.lock().unwrap();
-                                    let audio = match pipeline.audio_thread_ref() {
-                                        Some(a) => a,
-                                        None => {
-                                            error!("Audio not initialized — did you configure API key?");
-                                            sound::play_error(sound_on);
-                                            return;
-                                        }
-                                    };
-                                    audio.buffer().stop();
-                                    pipeline.set_status(pipeline::AppStatus::Processing);
-                                    // get_wav_data handles mono mixing + resampling to 16kHz
-                                    let wav = audio.buffer().get_wav_data();
-                                    (
-                                        wav,
-                                        pipeline.asr_client().cloned(),
-                                        pipeline.llm_client().cloned(),
-                                    )
-                                };
-
-                                let wav_data = match wav_result {
-                                    Ok(d) => {
-                                        let duration_secs = d.len() as f64 / (16000.0 * 2.0); // 16kHz, 16-bit mono
-                                        info!(
-                                            "WAV encoded: {} bytes (~{:.1}s audio)",
-                                            d.len(),
-                                            duration_secs
-                                        );
-                                        d
-                                    }
-                                    Err(e) => {
-                                        warn!("WAV encoding failed: {e}");
-                                        sound::play_error(sound_on);
-                                        let pipeline = state.0.lock().unwrap();
-                                        pipeline.set_status(pipeline::AppStatus::Idle);
-                                        return;
-                                    }
-                                };
-
-                                // ASR
-                                let asr = match asr_client {
-                                    Some(a) => a,
-                                    None => {
-                                        warn!("ASR not configured — please set API key in settings");
-                                        sound::play_error(sound_on);
-                                        let pipeline = state.0.lock().unwrap();
-                                        pipeline.set_status(pipeline::AppStatus::Idle);
-                                        return;
-                                    }
-                                };
-
-                                let asr_start = Instant::now();
-                                let raw_text = match asr.recognize(&wav_data).await {
-                                    Ok(t) => {
-                                        info!(
-                                            "ASR completed in {:.1}s: \"{}\"",
-                                            asr_start.elapsed().as_secs_f64(),
-                                            t
-                                        );
-                                        t
-                                    }
-                                    Err(e) => {
-                                        error!("ASR failed: {e}");
-                                        sound::play_error(sound_on);
-                                        let pipeline = state.0.lock().unwrap();
-                                        pipeline.set_status(pipeline::AppStatus::Idle);
-                                        return;
-                                    }
-                                };
-
-                                // Keep raw text for history before LLM may consume it.
-                                let raw_text_for_history = raw_text.clone();
-
-                                // Load personal dictionary (best-effort; empty on failure).
-                                let dictionary: Vec<String> = handle2
-                                    .store("config.json")
-                                    .ok()
-                                    .and_then(|s| {
-                                        s.get("dictionary")
-                                            .and_then(|v| serde_json::from_value(v).ok())
-                                    })
-                                    .unwrap_or_default();
-
-                                // LLM polish
-                                let final_text = if let Some(llm) = &llm_client {
-                                    let llm_start = Instant::now();
-                                    match llm.polish(&raw_text, &dictionary).await {
-                                        Ok(p) => {
-                                            if p != raw_text {
-                                                info!(
-                                                    "LLM polished in {:.1}s: \"{}\" -> \"{}\"",
-                                                    llm_start.elapsed().as_secs_f64(),
-                                                    raw_text,
-                                                    p
-                                                );
-                                            } else {
-                                                info!(
-                                                    "LLM returned unchanged text in {:.1}s",
-                                                    llm_start.elapsed().as_secs_f64()
-                                                );
-                                            }
-                                            p
-                                        }
-                                        Err(e) => {
-                                            warn!(
-                                                "LLM polish failed (using raw text): {e}"
-                                            );
-                                            raw_text
-                                        }
-                                    }
-                                } else {
-                                    debug!("LLM disabled, skipping polish");
-                                    raw_text
-                                };
-
-                                // Inject text
-                                let injection_ok;
-                                match injector::TextInjector::new() {
-                                    Ok(mut inj) => {
-                                        if let Err(e) = inj.inject(&final_text) {
-                                            error!("Text injection failed: {e}");
-                                            sound::play_error(sound_on);
-                                            injection_ok = false;
-                                        } else {
-                                            info!(
-                                                "Text injected successfully ({} chars)",
-                                                final_text.len()
-                                            );
-                                            // Play stop sound on successful injection.
-                                            sound::play_stop(sound_on);
-                                            // Cache raw and polished text for re-inject / AI-revert shortcuts.
-                                            let pipeline = state.0.lock().unwrap();
-                                            pipeline.set_last_transcription(
-                                                raw_text_for_history.clone(),
-                                                final_text.clone(),
-                                            );
-                                            injection_ok = true;
-                                        }
-                                    }
-                                    Err(e) => {
-                                        error!("Failed to init injector: {e}");
-                                        sound::play_error(sound_on);
-                                        injection_ok = false;
-                                    }
-                                }
-
-                                // Save to history after successful injection
-                                if injection_ok {
-                                    let duration_secs =
-                                        wav_data.len() as f64 / (16000.0 * 2.0);
-                                    let history_state = handle2.state::<HistoryState>();
-                                    let record = HistoryRecord {
-                                        id: 0,
-                                        timestamp: Utc::now().to_rfc3339(),
-                                        raw_text: raw_text_for_history,
-                                        polished_text: final_text.clone(),
-                                        duration_secs,
-                                        app_name: context::get_frontmost_app_name(),
-                                    };
-                                    if let Err(e) = history_state.0.insert(&record) {
-                                        error!("Failed to save history record: {e}");
-                                    } else {
-                                        info!("History record saved");
-                                    }
-                                }
-
-                                info!(
-                                    "Pipeline completed in {:.1}s",
-                                    pipeline_start.elapsed().as_secs_f64()
-                                );
-
-                                let pipeline = state.0.lock().unwrap();
-                                pipeline.set_status(pipeline::AppStatus::Idle);
-                            });
-                        }
-                    }
-                },
-            )?;
+            // Update the CurrentHotkey managed state to reflect the actual hotkey
+            // that was just registered (may differ from the compile-time default).
+            {
+                let current_hotkey = app.state::<CurrentHotkey>();
+                let mut current = current_hotkey.0.lock().unwrap();
+                *current = push_to_talk_hotkey.clone();
+            }
 
             info!("Global shortcut registered: {push_to_talk_hotkey}");
 
@@ -516,6 +606,8 @@ pub fn run() {
                                 sound::play_error(sound_on);
                             } else {
                                 sound::play_start(sound_on);
+                                // Show floating bar so user sees recording status immediately.
+                                show_floating_bar(&handle_trans);
                             }
                         }
                         ShortcutState::Released => {
@@ -569,6 +661,7 @@ pub fn run() {
                                         sound::play_error(sound_on);
                                         let pipeline = state.0.lock().unwrap();
                                         pipeline.set_status(pipeline::AppStatus::Idle);
+                                        hide_floating_bar(&handle2);
                                         return;
                                     }
                                 };
@@ -581,6 +674,7 @@ pub fn run() {
                                         sound::play_error(sound_on);
                                         let pipeline = state.0.lock().unwrap();
                                         pipeline.set_status(pipeline::AppStatus::Idle);
+                                        hide_floating_bar(&handle2);
                                         return;
                                     }
                                 };
@@ -600,6 +694,7 @@ pub fn run() {
                                         sound::play_error(sound_on);
                                         let pipeline = state.0.lock().unwrap();
                                         pipeline.set_status(pipeline::AppStatus::Idle);
+                                        hide_floating_bar(&handle2);
                                         return;
                                     }
                                 };
@@ -682,6 +777,8 @@ pub fn run() {
 
                                 let pipeline = state.0.lock().unwrap();
                                 pipeline.set_status(pipeline::AppStatus::Idle);
+                                // Hide floating bar now that the pipeline is idle.
+                                hide_floating_bar(&handle2);
                             });
                         }
                     }

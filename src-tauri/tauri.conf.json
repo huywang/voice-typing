@@ -17,6 +17,21 @@
         "height": 600,
         "resizable": true,
         "visible": true
+      },
+      {
+        "label": "floating-bar",
+        "title": "",
+        "url": "index.html?view=floating",
+        "width": 300,
+        "height": 60,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "visible": false,
+        "x": 560,
+        "y": 900
       }
     ],
     "security": {

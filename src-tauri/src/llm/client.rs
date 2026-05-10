@@ -59,7 +59,14 @@ impl LlmClient {
     /// If polishing is disabled, returns the raw text unchanged.
     /// If the API call fails, falls back to the raw text.
     /// The optional `dictionary` slice lists custom terms that must be preserved verbatim.
-    pub async fn polish(&self, raw_text: &str, dictionary: &[String]) -> Result<String, LlmError> {
+    /// The optional `tone` string adjusts the stylistic tone of the output (e.g. "formal,
+    /// professional"). When empty the default prompt tone is used.
+    pub async fn polish(
+        &self,
+        raw_text: &str,
+        dictionary: &[String],
+        tone: &str,
+    ) -> Result<String, LlmError> {
         if raw_text.is_empty() {
             debug!("LLM polish: empty input, skipping");
             return Ok(String::new());
@@ -70,10 +77,10 @@ impl LlmClient {
             return Ok(raw_text.to_string());
         }
 
-        info!("LLM polish request: \"{}\"", raw_text);
+        info!("LLM polish request (tone=\"{}\"): \"{}\"", tone, raw_text);
 
-        // Build system prompt, appending dictionary terms when provided.
-        let system_prompt = if dictionary.is_empty() {
+        // Build system prompt, appending dictionary terms and tone instructions when provided.
+        let mut system_prompt = if dictionary.is_empty() {
             POLISH_SYSTEM_PROMPT.to_string()
         } else {
             let terms = dictionary.join("、");
@@ -82,6 +89,12 @@ impl LlmClient {
                 POLISH_SYSTEM_PROMPT, terms
             )
         };
+
+        // Append tone instruction when a non-empty tone descriptor is given.
+        if !tone.is_empty() {
+            debug!("LLM polish: applying tone \"{}\"", tone);
+            system_prompt.push_str(&format!("\n\n请使用{}的语气风格。", tone));
+        }
 
         let request_body = ChatRequest {
             model: "qwen-plus".to_string(),
@@ -265,7 +278,7 @@ mod tests {
     #[tokio::test]
     async fn test_polish_empty_string() {
         let client = LlmClient::new("test-key".to_string());
-        let result = client.polish("", &[]).await.unwrap();
+        let result = client.polish("", &[], "").await.unwrap();
         assert_eq!(result, "");
     }
 
@@ -273,7 +286,7 @@ mod tests {
     async fn test_polish_disabled() {
         let mut client = LlmClient::new("test-key".to_string());
         client.set_enabled(false);
-        let result = client.polish("嗯那个你好", &[]).await.unwrap();
+        let result = client.polish("嗯那个你好", &[], "").await.unwrap();
         assert_eq!(result, "嗯那个你好");
     }
 
@@ -282,7 +295,19 @@ mod tests {
         let mut client = LlmClient::new("test-key".to_string());
         client.set_enabled(false);
         let dict = vec!["Tauri".to_string(), "Rust".to_string()];
-        let result = client.polish("嗯那个你好", &dict).await.unwrap();
+        let result = client.polish("嗯那个你好", &dict, "").await.unwrap();
+        assert_eq!(result, "嗯那个你好");
+    }
+
+    #[tokio::test]
+    async fn test_polish_disabled_with_tone() {
+        // Tone parameter should not prevent early-return when polishing is disabled.
+        let mut client = LlmClient::new("test-key".to_string());
+        client.set_enabled(false);
+        let result = client
+            .polish("嗯那个你好", &[], "formal, professional")
+            .await
+            .unwrap();
         assert_eq!(result, "嗯那个你好");
     }
 

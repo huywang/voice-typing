@@ -165,6 +165,24 @@ impl HistoryDb {
         Ok(())
     }
 
+    /// Delete history records older than `days` days. Returns the number of deleted records.
+    pub fn cleanup_older_than(&self, days: u32) -> Result<u32, String> {
+        let conn = self.conn.lock().unwrap();
+        let affected = conn
+            .execute(
+                &format!(
+                    "DELETE FROM history WHERE timestamp < datetime('now', '-{days} days')"
+                ),
+                [],
+            )
+            .map_err(|e| {
+                error!("Failed to cleanup history older than {days} days: {e}");
+                format!("Failed to cleanup history: {e}")
+            })?;
+        info!("Cleaned up {affected} history record(s) older than {days} days");
+        Ok(affected as u32)
+    }
+
     /// Return the total number of history records.
     pub fn count(&self) -> Result<u32, String> {
         let conn = self.conn.lock().unwrap();
