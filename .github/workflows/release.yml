@@ -5,6 +5,9 @@ on:
     tags:
       - "v*"
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ${{ matrix.os }}
@@ -60,7 +63,24 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Voice Typing ${{ github.ref_name }}"
-          releaseBody: "See the assets below to download and install."
+          releaseBody: |
+            ## What's New
+            See [CHANGELOG](https://github.com/huywang/voice-typing/commits/${{ github.ref_name }}) for details.
+
+            ## Download
+            | Platform | File |
+            |----------|------|
+            | macOS (Apple Silicon) | `.dmg` (aarch64) |
+            | macOS (Intel) | `.dmg` (x86_64) |
+            | Windows | `.msi` / `.exe` |
+            | Linux | `.deb` / `.AppImage` |
+
+            ## Installation
+            1. Download the appropriate file for your platform
+            2. Install and launch the app
+            3. Configure your DashScope API key in Settings
+            4. Press `Cmd+Shift+Space` (Mac) or `Ctrl+Shift+Space` (Win/Linux) to start voice typing
           releaseDraft: true
           prerelease: false
+          includeUpdaterJson: true
           args: --target ${{ matrix.target }}

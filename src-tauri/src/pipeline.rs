@@ -12,6 +12,7 @@ pub enum AppStatus {
     Idle,
     Recording,
     Processing,
+    #[allow(dead_code)]
     Error(String),
 }
 
@@ -116,6 +117,7 @@ impl Pipeline {
     }
 
     /// Get the currently selected device name (None = system default).
+    #[allow(dead_code)]
     pub fn selected_device(&self) -> Option<&str> {
         self.selected_device.as_deref()
     }

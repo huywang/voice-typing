@@ -40,11 +40,13 @@ impl RecordingBuffer {
     }
 
     /// Check if currently recording.
+    #[allow(dead_code)]
     pub fn is_recording(&self) -> bool {
         self.inner.lock().unwrap().is_recording
     }
 
     /// Get a copy of recorded samples.
+    #[allow(dead_code)]
     pub fn samples(&self) -> Vec<f32> {
         self.inner.lock().unwrap().samples.clone()
     }
@@ -65,11 +67,13 @@ impl RecordingBuffer {
     }
 
     /// Get device sample rate.
+    #[allow(dead_code)]
     pub fn device_sample_rate(&self) -> u32 {
         self.inner.lock().unwrap().device_sample_rate
     }
 
     /// Get device channel count.
+    #[allow(dead_code)]
     pub fn device_channels(&self) -> u16 {
         self.inner.lock().unwrap().device_channels
     }
@@ -126,9 +130,12 @@ impl RecordingBuffer {
 /// created and used on the same thread, or managed via a dedicated
 /// audio thread.
 pub struct AudioRecorder {
+    #[allow(dead_code)]
     buffer: RecordingBuffer,
     _stream: Stream,
+    #[allow(dead_code)]
     device_sample_rate: u32,
+    #[allow(dead_code)]
     device_channels: u16,
 }
 
@@ -230,11 +237,13 @@ impl AudioRecorder {
     }
 
     /// Get the recording buffer.
+    #[allow(dead_code)]
     pub fn buffer(&self) -> &RecordingBuffer {
         &self.buffer
     }
 
     /// Get the recorded audio as 16kHz mono WAV bytes.
+    #[allow(dead_code)]
     pub fn get_wav_data(&self) -> Result<Vec<u8>, AudioError> {
         let samples = self.buffer.samples();
         if samples.is_empty() {
@@ -299,6 +308,7 @@ fn resample(samples: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
 }
 
 /// Errors that can occur during audio recording.
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, thiserror::Error)]
 pub enum AudioError {
     #[error("No input device found")]
@@ -310,9 +320,11 @@ pub enum AudioError {
     #[error("Audio stream error: {0}")]
     StreamError(String),
 
+    #[allow(dead_code)]
     #[error("No audio data recorded")]
     NoData,
 
+    #[allow(dead_code)]
     #[error("Audio encoding error: {0}")]
     EncodingError(String),
 }

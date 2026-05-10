@@ -50,6 +50,7 @@ impl LlmClient {
     }
 
     /// Check if polishing is enabled.
+    #[allow(dead_code)]
     pub fn is_enabled(&self) -> bool {
         self.enabled
     }
@@ -246,6 +247,7 @@ struct ChatChoice {
 }
 
 /// Errors that can occur during LLM polishing.
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, thiserror::Error)]
 pub enum LlmError {
     #[error("Network error: {0}")]

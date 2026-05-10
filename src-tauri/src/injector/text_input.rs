@@ -90,6 +90,7 @@ impl TextInjector {
 }
 
 /// Errors that can occur during text injection.
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, thiserror::Error)]
 pub enum InjectionError {
     /// Failed to initialize the input simulator.
