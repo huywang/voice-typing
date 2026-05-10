@@ -6,6 +6,10 @@ use serde::{Deserialize, Serialize};
 const DASHSCOPE_LLM_URL: &str =
     "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions";
 
+/// System prompt template for translation. `{target_language}` is replaced at runtime.
+const TRANSLATE_SYSTEM_PROMPT_TEMPLATE: &str =
+    "你是一个翻译助手。将用户输入的文本翻译成{target_language}。只返回翻译结果，不要添加任何解释。保持原文的语气和风格。";
+
 /// System prompt for text polishing.
 const POLISH_SYSTEM_PROMPT: &str = r#"你是一个语音转文字的后处理助手。你的任务是润色语音识别的原始文本，使其更加通顺自然。
 
@@ -130,6 +134,73 @@ impl LlmClient {
             .unwrap_or_else(|| raw_text.to_string());
 
         Ok(polished)
+    }
+
+    /// Translate `text` into `target_language` using Qwen LLM.
+    ///
+    /// Returns the translated string, or an error if the API call fails.
+    pub async fn translate(&self, text: &str, target_language: &str) -> Result<String, LlmError> {
+        if text.is_empty() {
+            debug!("LLM translate: empty input, skipping");
+            return Ok(String::new());
+        }
+
+        info!("LLM translate request: \"{}\" -> {}", text, target_language);
+
+        let system_prompt = TRANSLATE_SYSTEM_PROMPT_TEMPLATE
+            .replace("{target_language}", target_language);
+
+        let request_body = ChatRequest {
+            model: "qwen-plus".to_string(),
+            messages: vec![
+                ChatMessage {
+                    role: "system".to_string(),
+                    content: system_prompt,
+                },
+                ChatMessage {
+                    role: "user".to_string(),
+                    content: text.to_string(),
+                },
+            ],
+            max_tokens: 2048,
+            temperature: 0.3,
+        };
+
+        let response = self
+            .http
+            .post(DASHSCOPE_LLM_URL)
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header("Content-Type", "application/json")
+            .json(&request_body)
+            .send()
+            .await
+            .map_err(|e| LlmError::NetworkError(format!("{e}")))?;
+
+        let status = response.status();
+        debug!("LLM translate response status: {}", status);
+
+        let body = response
+            .text()
+            .await
+            .map_err(|e| LlmError::NetworkError(format!("Failed to read response: {e}")))?;
+
+        if !status.is_success() {
+            warn!("LLM translate API error: HTTP {status}, body: {body}");
+            return Err(LlmError::ApiError(format!("HTTP {status}: {body}")));
+        }
+
+        debug!("LLM translate response body: {}", body);
+
+        let chat_response: ChatResponse = serde_json::from_str(&body)
+            .map_err(|e| LlmError::ParseError(format!("Failed to parse response: {e}")))?;
+
+        let translated = chat_response
+            .choices
+            .first()
+            .map(|c| c.message.content.trim().to_string())
+            .unwrap_or_else(|| text.to_string());
+
+        Ok(translated)
     }
 }
 

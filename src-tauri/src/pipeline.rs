@@ -46,6 +46,8 @@ pub struct Pipeline {
     last_transcription: Arc<Mutex<Option<LastTranscription>>>,
     /// User-selected audio input device name. None means system default.
     selected_device: Option<String>,
+    /// Target language for translation mode (e.g. "English", "中文").
+    translation_target: Arc<Mutex<String>>,
 }
 
 // Safety: The non-Send AudioRecorder lives inside a dedicated thread.
@@ -63,6 +65,7 @@ impl Pipeline {
             status: Arc::new(Mutex::new(AppStatus::Idle)),
             last_transcription: Arc::new(Mutex::new(None)),
             selected_device: None,
+            translation_target: Arc::new(Mutex::new("English".to_string())),
         }
     }
 
@@ -115,6 +118,17 @@ impl Pipeline {
     /// Get the currently selected device name (None = system default).
     pub fn selected_device(&self) -> Option<&str> {
         self.selected_device.as_deref()
+    }
+
+    /// Get the current translation target language.
+    pub fn translation_target(&self) -> String {
+        self.translation_target.lock().unwrap().clone()
+    }
+
+    /// Set the translation target language (e.g. "English", "中文").
+    pub fn set_translation_target(&self, language: String) {
+        info!("Translation target set to: {}", language);
+        *self.translation_target.lock().unwrap() = language;
     }
 
     fn ensure_audio_thread(&mut self) -> Result<(), String> {

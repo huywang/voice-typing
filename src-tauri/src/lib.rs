@@ -57,6 +57,10 @@ pub fn run() {
             commands::list_audio_devices,
             commands::set_audio_device,
             commands::get_audio_device,
+            commands::get_hotkey,
+            commands::set_hotkey,
+            commands::set_translation_target,
+            commands::get_translation_target,
         ])
         .setup(|app| {
             // Initialize history database
@@ -116,6 +120,18 @@ pub fn run() {
                         debug!("selected_device restored from store: {dev}");
                     }
 
+                    // Restore translation target language (default: "English").
+                    let translation_target = store
+                        .get("translation_target")
+                        .and_then(|v| v.as_str().map(|s| s.to_string()))
+                        .unwrap_or_else(|| "English".to_string());
+                    debug!("translation_target restored from store: {translation_target}");
+                    {
+                        let state = app.state::<PipelineState>();
+                        let pipeline = state.0.lock().unwrap();
+                        pipeline.set_translation_target(translation_target);
+                    }
+
                     if let Some(key) = api_key {
                         if !key.is_empty() {
                             info!(
@@ -147,10 +163,20 @@ pub fn run() {
                 }
             }
 
-            // Global hotkey: Cmd+Shift+Space (Mac) / Ctrl+Shift+Space (Win/Linux)
+            // Read the push-to-talk hotkey from the store (falls back to the
+            // built-in default when no custom value has been persisted yet).
+            let push_to_talk_hotkey = app
+                .store("config.json")
+                .ok()
+                .and_then(|s| s.get("push_to_talk_hotkey"))
+                .and_then(|v| v.as_str().map(|s| s.to_string()))
+                .unwrap_or_else(|| commands::DEFAULT_HOTKEY.to_string());
+            info!("Registering push-to-talk hotkey: {push_to_talk_hotkey}");
+
+            // Global hotkey: configurable push-to-talk (default CmdOrCtrl+Shift+Space)
             let handle = app.handle().clone();
             app.global_shortcut().on_shortcut(
-                "CmdOrCtrl+Shift+Space",
+                push_to_talk_hotkey.as_str(),
                 move |_app, _shortcut, event| {
                     // Read sound_enabled from store on every event so Settings
                     // changes are picked up without a restart.
@@ -369,7 +395,7 @@ pub fn run() {
                 },
             )?;
 
-            info!("Global shortcut registered: CmdOrCtrl+Shift+Space");
+            info!("Global shortcut registered: {push_to_talk_hotkey}");
 
             // Secondary hotkey: re-inject the last transcription.
             // Ctrl+Cmd+V on Mac / Ctrl+Alt+V on Win/Linux.
@@ -462,6 +488,203 @@ pub fn run() {
             )?;
 
             info!("Global shortcut registered: CmdOrCtrl+Alt+Z (AI revert)");
+
+            // Translation hotkey: CmdOrCtrl+Shift+T
+            // Hold to record, release to transcribe then translate to target language.
+            let handle_trans = app.handle().clone();
+            app.global_shortcut().on_shortcut(
+                "CmdOrCtrl+Shift+T",
+                move |_app, _shortcut, event| {
+                    let sound_on = handle_trans
+                        .store("config.json")
+                        .ok()
+                        .and_then(|s| s.get("sound_enabled"))
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(true);
+
+                    let state = handle_trans.state::<PipelineState>();
+                    match event.state {
+                        ShortcutState::Pressed => {
+                            info!("Translation hotkey pressed — starting recording");
+                            let mut pipeline = state.0.lock().unwrap();
+                            if let Err(e) = pipeline.start_recording() {
+                                error!("Failed to start recording (translation): {e}");
+                                sound::play_error(sound_on);
+                            } else {
+                                sound::play_start(sound_on);
+                            }
+                        }
+                        ShortcutState::Released => {
+                            info!("Translation hotkey released — stopping recording and translating");
+                            let handle2 = handle_trans.clone();
+                            tauri::async_runtime::spawn(async move {
+                                let sound_on = handle2
+                                    .store("config.json")
+                                    .ok()
+                                    .and_then(|s| s.get("sound_enabled"))
+                                    .and_then(|v| v.as_bool())
+                                    .unwrap_or(true);
+
+                                let pipeline_start = Instant::now();
+                                let state = handle2.state::<PipelineState>();
+
+                                // Extract data under lock then drop it.
+                                let (wav_result, asr_client, llm_client, translation_target) = {
+                                    let pipeline = state.0.lock().unwrap();
+                                    let audio = match pipeline.audio_thread_ref() {
+                                        Some(a) => a,
+                                        None => {
+                                            error!("Audio not initialized — did you configure API key?");
+                                            sound::play_error(sound_on);
+                                            return;
+                                        }
+                                    };
+                                    audio.buffer().stop();
+                                    pipeline.set_status(pipeline::AppStatus::Processing);
+                                    let wav = audio.buffer().get_wav_data();
+                                    (
+                                        wav,
+                                        pipeline.asr_client().cloned(),
+                                        pipeline.llm_client().cloned(),
+                                        pipeline.translation_target(),
+                                    )
+                                };
+
+                                let wav_data = match wav_result {
+                                    Ok(d) => {
+                                        let duration_secs = d.len() as f64 / (16000.0 * 2.0);
+                                        info!(
+                                            "Translation WAV encoded: {} bytes (~{:.1}s audio)",
+                                            d.len(),
+                                            duration_secs
+                                        );
+                                        d
+                                    }
+                                    Err(e) => {
+                                        warn!("WAV encoding failed (translation): {e}");
+                                        sound::play_error(sound_on);
+                                        let pipeline = state.0.lock().unwrap();
+                                        pipeline.set_status(pipeline::AppStatus::Idle);
+                                        return;
+                                    }
+                                };
+
+                                // ASR
+                                let asr = match asr_client {
+                                    Some(a) => a,
+                                    None => {
+                                        warn!("ASR not configured — please set API key in settings");
+                                        sound::play_error(sound_on);
+                                        let pipeline = state.0.lock().unwrap();
+                                        pipeline.set_status(pipeline::AppStatus::Idle);
+                                        return;
+                                    }
+                                };
+
+                                let asr_start = Instant::now();
+                                let raw_text = match asr.recognize(&wav_data).await {
+                                    Ok(t) => {
+                                        info!(
+                                            "ASR completed in {:.1}s: \"{}\"",
+                                            asr_start.elapsed().as_secs_f64(),
+                                            t
+                                        );
+                                        t
+                                    }
+                                    Err(e) => {
+                                        error!("ASR failed (translation): {e}");
+                                        sound::play_error(sound_on);
+                                        let pipeline = state.0.lock().unwrap();
+                                        pipeline.set_status(pipeline::AppStatus::Idle);
+                                        return;
+                                    }
+                                };
+
+                                // Translation via LLM
+                                let translated_text = if let Some(llm) = &llm_client {
+                                    let llm_start = Instant::now();
+                                    match llm.translate(&raw_text, &translation_target).await {
+                                        Ok(t) => {
+                                            info!(
+                                                "LLM translated in {:.1}s: \"{}\" -> \"{}\"",
+                                                llm_start.elapsed().as_secs_f64(),
+                                                raw_text,
+                                                t
+                                            );
+                                            t
+                                        }
+                                        Err(e) => {
+                                            warn!("LLM translation failed (using raw text): {e}");
+                                            raw_text.clone()
+                                        }
+                                    }
+                                } else {
+                                    warn!("LLM not configured — translation requires LLM; using raw text");
+                                    raw_text.clone()
+                                };
+
+                                // Inject translated text
+                                let injection_ok;
+                                match injector::TextInjector::new() {
+                                    Ok(mut inj) => {
+                                        if let Err(e) = inj.inject(&translated_text) {
+                                            error!("Text injection failed (translation): {e}");
+                                            sound::play_error(sound_on);
+                                            injection_ok = false;
+                                        } else {
+                                            info!(
+                                                "Translated text injected ({} chars)",
+                                                translated_text.len()
+                                            );
+                                            sound::play_stop(sound_on);
+                                            let pipeline = state.0.lock().unwrap();
+                                            pipeline.set_last_transcription(
+                                                raw_text.clone(),
+                                                translated_text.clone(),
+                                            );
+                                            injection_ok = true;
+                                        }
+                                    }
+                                    Err(e) => {
+                                        error!("Failed to init injector (translation): {e}");
+                                        sound::play_error(sound_on);
+                                        injection_ok = false;
+                                    }
+                                }
+
+                                // Save to history after successful injection
+                                if injection_ok {
+                                    let duration_secs = wav_data.len() as f64 / (16000.0 * 2.0);
+                                    let history_state = handle2.state::<HistoryState>();
+                                    let record = HistoryRecord {
+                                        id: 0,
+                                        timestamp: Utc::now().to_rfc3339(),
+                                        raw_text,
+                                        polished_text: translated_text.clone(),
+                                        duration_secs,
+                                        app_name: String::new(),
+                                    };
+                                    if let Err(e) = history_state.0.insert(&record) {
+                                        error!("Failed to save translation history record: {e}");
+                                    } else {
+                                        info!("Translation history record saved");
+                                    }
+                                }
+
+                                info!(
+                                    "Translation pipeline completed in {:.1}s",
+                                    pipeline_start.elapsed().as_secs_f64()
+                                );
+
+                                let pipeline = state.0.lock().unwrap();
+                                pipeline.set_status(pipeline::AppStatus::Idle);
+                            });
+                        }
+                    }
+                },
+            )?;
+
+            info!("Global shortcut registered: CmdOrCtrl+Shift+T (translation mode)");
             Ok(())
         })
         .run(tauri::generate_context!())

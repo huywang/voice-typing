@@ -516,3 +516,86 @@ pub fn get_audio_device(app: AppHandle) -> Option<String> {
     );
     result
 }
+
+/// Set the translation target language and persist to store.
+#[tauri::command]
+pub fn set_translation_target(
+    app: AppHandle,
+    state: State<PipelineState>,
+    language: String,
+) -> Result<(), String> {
+    info!("Setting translation target: {}", language);
+    {
+        let pipeline = state.0.lock().unwrap();
+        pipeline.set_translation_target(language.clone());
+    }
+    match app.store("config.json") {
+        Ok(store) => {
+            store.set("translation_target", serde_json::json!(language));
+            if let Err(e) = store.save() {
+                error!("Failed to save translation_target: {e}");
+                return Err(format!("Failed to save translation_target: {e}"));
+            }
+            info!("translation_target persisted to store");
+        }
+        Err(e) => {
+            error!("Failed to open config store for translation_target: {e}");
+            return Err(format!("Failed to open config store: {e}"));
+        }
+    }
+    Ok(())
+}
+
+/// Get the currently persisted translation target language (default: "English").
+#[tauri::command]
+pub fn get_translation_target(app: AppHandle) -> String {
+    let result = app
+        .store("config.json")
+        .ok()
+        .and_then(|s| s.get("translation_target"))
+        .and_then(|v| v.as_str().map(|s| s.to_string()))
+        .unwrap_or_else(|| "English".to_string());
+    debug!("get_translation_target: {}", result);
+    result
+}
+
+/// Default push-to-talk hotkey string used when no custom value has been saved.
+pub const DEFAULT_HOTKEY: &str = "CmdOrCtrl+Shift+Space";
+
+/// Get the persisted push-to-talk hotkey string.
+///
+/// Returns the stored value or the built-in default if nothing has been saved yet.
+#[tauri::command]
+pub fn get_hotkey(app: AppHandle) -> String {
+    let hotkey = app
+        .store("config.json")
+        .ok()
+        .and_then(|s| s.get("push_to_talk_hotkey"))
+        .and_then(|v| v.as_str().map(|s| s.to_string()))
+        .unwrap_or_else(|| DEFAULT_HOTKEY.to_string());
+    debug!("get_hotkey: {hotkey}");
+    hotkey
+}
+
+/// Persist the push-to-talk hotkey string to the store.
+///
+/// The new hotkey takes effect after the next application restart.
+#[tauri::command]
+pub fn set_hotkey(app: AppHandle, hotkey: String) -> Result<(), String> {
+    info!("set_hotkey: {hotkey}");
+    match app.store("config.json") {
+        Ok(store) => {
+            store.set("push_to_talk_hotkey", serde_json::json!(hotkey));
+            if let Err(e) = store.save() {
+                error!("Failed to save push_to_talk_hotkey: {e}");
+                return Err(format!("Failed to save hotkey: {e}"));
+            }
+            info!("push_to_talk_hotkey persisted: {hotkey}");
+            Ok(())
+        }
+        Err(e) => {
+            error!("Failed to open config store for push_to_talk_hotkey: {e}");
+            Err(format!("Failed to open config store: {e}"))
+        }
+    }
+}

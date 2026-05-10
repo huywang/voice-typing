@@ -44,6 +44,8 @@ impl AsrClient {
             audio_base64.len()
         );
 
+        // qwen3-asr-flash supports automatic language detection for Chinese, English,
+        // and mixed-language input. No language parameter needed.
         let request_body = ChatRequest {
             model: "qwen3-asr-flash".to_string(),
             messages: vec![ChatMessage {
