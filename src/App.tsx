@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import Settings from "./pages/Settings";
+import History from "./pages/History";
 import RecordingOverlay from "./components/RecordingOverlay";
 import "./App.css";
 
-type AppView = "main" | "settings";
+type AppView = "main" | "settings" | "history";
 
 function App() {
   const [view, setView] = useState<AppView>("main");
@@ -41,6 +42,10 @@ function App() {
     return <Settings onBack={() => setView("main")} onSave={handleConfigured} />;
   }
 
+  if (view === "history") {
+    return <History onBack={() => setView("main")} />;
+  }
+
   return (
     <main className="container">
       <RecordingOverlay />
@@ -64,6 +69,7 @@ function App() {
       )}
 
       <div className="actions">
+        <button onClick={() => setView("history")}>History</button>
         <button onClick={() => setView("settings")}>Settings</button>
       </div>
 

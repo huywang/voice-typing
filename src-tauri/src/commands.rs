@@ -1,10 +1,15 @@
+use chrono::Utc;
 use log::{debug, error, info, warn};
 use std::sync::Mutex;
 use std::time::Instant;
 use tauri::{AppHandle, State};
 use tauri_plugin_store::StoreExt;
 
+use crate::history::{HistoryDb, HistoryRecord};
 use crate::pipeline::{AppStatus, Pipeline};
+
+/// Shared history database state managed by Tauri.
+pub struct HistoryState(pub HistoryDb);
 
 /// Shared pipeline state managed by Tauri.
 pub struct PipelineState(pub Mutex<Pipeline>);
@@ -65,7 +70,10 @@ pub fn start_recording(state: State<PipelineState>) -> Result<(), String> {
 /// We extract the data we need from the locked pipeline, drop the lock,
 /// then perform async operations without holding the MutexGuard.
 #[tauri::command]
-pub async fn stop_and_process(state: State<'_, PipelineState>) -> Result<String, String> {
+pub async fn stop_and_process(
+    state: State<'_, PipelineState>,
+    history: State<'_, HistoryState>,
+) -> Result<String, String> {
     let pipeline_start = Instant::now();
     info!("stop_and_process command invoked");
 
@@ -117,6 +125,9 @@ pub async fn stop_and_process(state: State<'_, PipelineState>) -> Result<String,
         raw_text
     );
 
+    // Keep a copy of the raw text for history before LLM may consume it.
+    let raw_text_for_history = raw_text.clone();
+
     // LLM polishing (with fallback)
     let final_text = if let Some(llm) = &llm_client {
         let llm_start = Instant::now();
@@ -164,5 +175,43 @@ pub async fn stop_and_process(state: State<'_, PipelineState>) -> Result<String,
         pipeline.set_status(AppStatus::Idle);
     }
 
+    // Save to history
+    let duration_secs = wav_data.len() as f64 / (16000.0 * 2.0); // 16kHz, 16-bit mono
+    let record = HistoryRecord {
+        id: 0,
+        timestamp: Utc::now().to_rfc3339(),
+        raw_text: raw_text_for_history,
+        polished_text: final_text.clone(),
+        duration_secs,
+        app_name: String::new(),
+    };
+    if let Err(e) = history.0.insert(&record) {
+        error!("Failed to save history record: {e}");
+    } else {
+        info!("History record saved");
+    }
+
     Ok(final_text)
+}
+
+/// Get paginated history records, newest first.
+#[tauri::command]
+pub fn get_history(
+    state: State<HistoryState>,
+    limit: u32,
+    offset: u32,
+) -> Result<Vec<HistoryRecord>, String> {
+    state.0.list(limit, offset)
+}
+
+/// Clear all history records.
+#[tauri::command]
+pub fn clear_history(state: State<HistoryState>) -> Result<(), String> {
+    state.0.clear()
+}
+
+/// Get total number of history records.
+#[tauri::command]
+pub fn get_history_count(state: State<HistoryState>) -> Result<u32, String> {
+    state.0.count()
 }

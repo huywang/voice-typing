@@ -1,12 +1,15 @@
 mod asr;
 mod audio;
 mod commands;
+mod history;
 mod injector;
 mod llm;
 mod pipeline;
 mod tray;
 
-use commands::PipelineState;
+use chrono::Utc;
+use commands::{HistoryState, PipelineState};
+use history::{HistoryDb, HistoryRecord};
 use log::{debug, error, info, warn};
 use pipeline::Pipeline;
 use std::sync::Mutex;
@@ -32,8 +35,23 @@ pub fn run() {
             commands::set_api_config,
             commands::start_recording,
             commands::stop_and_process,
+            commands::get_history,
+            commands::clear_history,
+            commands::get_history_count,
         ])
         .setup(|app| {
+            // Initialize history database
+            let app_data_dir = app
+                .path()
+                .app_data_dir()
+                .map_err(|e| format!("Failed to get app data dir: {e}"))?;
+            std::fs::create_dir_all(&app_data_dir)
+                .map_err(|e| format!("Failed to create app data dir: {e}"))?;
+            let history_db = HistoryDb::init(&app_data_dir)
+                .map_err(|e| format!("Failed to init history DB: {e}"))?;
+            app.manage(HistoryState(history_db));
+            info!("History database ready");
+
             // System tray
             tray::setup_tray(app.handle())?;
             info!("System tray initialized");
@@ -160,6 +178,9 @@ pub fn run() {
                                     }
                                 };
 
+                                // Keep raw text for history before LLM may consume it.
+                                let raw_text_for_history = raw_text.clone();
+
                                 // LLM polish
                                 let final_text = if let Some(llm) = &llm_client {
                                     let llm_start = Instant::now();
@@ -193,18 +214,44 @@ pub fn run() {
                                 };
 
                                 // Inject text
+                                let injection_ok;
                                 match injector::TextInjector::new() {
                                     Ok(mut inj) => {
                                         if let Err(e) = inj.inject(&final_text) {
                                             error!("Text injection failed: {e}");
+                                            injection_ok = false;
                                         } else {
                                             info!(
                                                 "Text injected successfully ({} chars)",
                                                 final_text.len()
                                             );
+                                            injection_ok = true;
                                         }
                                     }
-                                    Err(e) => error!("Failed to init injector: {e}"),
+                                    Err(e) => {
+                                        error!("Failed to init injector: {e}");
+                                        injection_ok = false;
+                                    }
+                                }
+
+                                // Save to history after successful injection
+                                if injection_ok {
+                                    let duration_secs =
+                                        wav_data.len() as f64 / (16000.0 * 2.0);
+                                    let history_state = handle2.state::<HistoryState>();
+                                    let record = HistoryRecord {
+                                        id: 0,
+                                        timestamp: Utc::now().to_rfc3339(),
+                                        raw_text: raw_text_for_history,
+                                        polished_text: final_text.clone(),
+                                        duration_secs,
+                                        app_name: String::new(),
+                                    };
+                                    if let Err(e) = history_state.0.insert(&record) {
+                                        error!("Failed to save history record: {e}");
+                                    } else {
+                                        info!("History record saved");
+                                    }
                                 }
 
                                 info!(
