@@ -1,5 +1,7 @@
 use chrono::Utc;
+use cpal::traits::{DeviceTrait, HostTrait};
 use log::{debug, error, info, warn};
+use serde::Serialize;
 use std::sync::Mutex;
 use std::time::Instant;
 use tauri::{AppHandle, State};
@@ -72,6 +74,7 @@ pub fn start_recording(state: State<PipelineState>) -> Result<(), String> {
 /// then perform async operations without holding the MutexGuard.
 #[tauri::command]
 pub async fn stop_and_process(
+    app: AppHandle,
     state: State<'_, PipelineState>,
     history: State<'_, HistoryState>,
 ) -> Result<String, String> {
@@ -129,10 +132,23 @@ pub async fn stop_and_process(
     // Keep a copy of the raw text for history before LLM may consume it.
     let raw_text_for_history = raw_text.clone();
 
+    // Load personal dictionary from store (best-effort; empty on failure).
+    let dictionary: Vec<String> = app
+        .store("config.json")
+        .ok()
+        .and_then(|s| {
+            s.get("dictionary")
+                .and_then(|v| serde_json::from_value(v).ok())
+        })
+        .unwrap_or_default();
+    if !dictionary.is_empty() {
+        info!("Personal dictionary loaded: {} term(s)", dictionary.len());
+    }
+
     // LLM polishing (with fallback)
     let final_text = if let Some(llm) = &llm_client {
         let llm_start = Instant::now();
-        match llm.polish(&raw_text).await {
+        match llm.polish(&raw_text, &dictionary).await {
             Ok(polished) => {
                 info!(
                     "LLM polished in {:.1}s: \"{}\"",
@@ -170,10 +186,10 @@ pub async fn stop_and_process(
         final_text.len()
     );
 
-    // Update status and cache last transcription for the paste-last shortcut.
+    // Update status and cache raw + polished text for the re-inject / AI-revert shortcuts.
     {
         let pipeline = state.0.lock().unwrap();
-        pipeline.set_last_transcription(final_text.clone());
+        pipeline.set_last_transcription(raw_text_for_history.clone(), final_text.clone());
         pipeline.set_status(AppStatus::Idle);
     }
 
@@ -252,6 +268,62 @@ pub fn set_autostart_enabled(app: AppHandle, enabled: bool) -> Result<(), String
     Ok(())
 }
 
+/// Return true when running on macOS; used by the frontend to show macOS-only settings.
+#[tauri::command]
+pub fn is_macos() -> bool {
+    cfg!(target_os = "macos")
+}
+
+/// Get whether the dock icon is visible (macOS only; always true on other platforms).
+#[tauri::command]
+pub fn get_dock_visible(app: AppHandle) -> bool {
+    app.store("config.json")
+        .ok()
+        .and_then(|s| s.get("dock_visible"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true)
+}
+
+/// Show or hide the dock icon on macOS and persist the setting.
+///
+/// Uses `ActivationPolicy::Regular` to show and `ActivationPolicy::Accessory`
+/// to hide. On non-macOS platforms this is a no-op (returns Ok).
+#[tauri::command]
+pub fn set_dock_visible(app: AppHandle, visible: bool) -> Result<(), String> {
+    // Apply the activation policy on macOS only.
+    #[cfg(target_os = "macos")]
+    {
+        use tauri::ActivationPolicy;
+        let policy = if visible {
+            ActivationPolicy::Regular
+        } else {
+            ActivationPolicy::Accessory
+        };
+        if let Err(e) = app.set_activation_policy(policy) {
+            warn!("Failed to set activation policy: {e}");
+        } else {
+            info!("Dock icon visibility set to {visible}");
+        }
+    }
+
+    // Persist the setting so it survives restarts.
+    match app.store("config.json") {
+        Ok(store) => {
+            store.set("dock_visible", serde_json::json!(visible));
+            if let Err(e) = store.save() {
+                error!("Failed to save dock_visible setting: {e}");
+                return Err(format!("Failed to save dock_visible: {e}"));
+            }
+            info!("dock_visible set to {visible} and persisted");
+            Ok(())
+        }
+        Err(e) => {
+            error!("Failed to open config store for dock_visible: {e}");
+            Err(format!("Failed to open config store: {e}"))
+        }
+    }
+}
+
 /// Get whether sound effects are enabled.
 #[tauri::command]
 pub fn get_sound_enabled(app: AppHandle) -> bool {
@@ -280,4 +352,167 @@ pub fn set_sound_enabled(app: AppHandle, enabled: bool) -> Result<(), String> {
             Err(format!("Failed to open config store: {e}"))
         }
     }
+}
+
+/// Check whether the user has already completed the onboarding flow.
+#[tauri::command]
+pub fn is_onboarding_completed(app: AppHandle) -> bool {
+    let completed = app
+        .store("config.json")
+        .ok()
+        .and_then(|s| s.get("onboarding_completed"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    debug!("is_onboarding_completed: {completed}");
+    completed
+}
+
+/// Mark the onboarding flow as completed and persist the flag.
+#[tauri::command]
+pub fn complete_onboarding(app: AppHandle) -> Result<(), String> {
+    match app.store("config.json") {
+        Ok(store) => {
+            store.set("onboarding_completed", serde_json::json!(true));
+            if let Err(e) = store.save() {
+                error!("Failed to save onboarding_completed flag: {e}");
+                return Err(format!("Failed to save onboarding flag: {e}"));
+            }
+            info!("Onboarding marked as completed");
+            Ok(())
+        }
+        Err(e) => {
+            error!("Failed to open config store for onboarding flag: {e}");
+            Err(format!("Failed to open config store: {e}"))
+        }
+    }
+}
+
+/// Get the personal dictionary terms from the store.
+#[tauri::command]
+pub fn get_dictionary(app: AppHandle) -> Vec<String> {
+    let terms: Vec<String> = app
+        .store("config.json")
+        .ok()
+        .and_then(|s| {
+            s.get("dictionary")
+                .and_then(|v| serde_json::from_value(v).ok())
+        })
+        .unwrap_or_default();
+    debug!("get_dictionary: {} term(s)", terms.len());
+    terms
+}
+
+/// Save the personal dictionary terms to the store.
+#[tauri::command]
+pub fn set_dictionary(app: AppHandle, terms: Vec<String>) -> Result<(), String> {
+    match app.store("config.json") {
+        Ok(store) => {
+            store.set("dictionary", serde_json::json!(terms));
+            if let Err(e) = store.save() {
+                error!("Failed to save dictionary: {e}");
+                return Err(format!("Failed to save dictionary: {e}"));
+            }
+            info!("Personal dictionary saved: {} term(s)", terms.len());
+            Ok(())
+        }
+        Err(e) => {
+            error!("Failed to open config store for dictionary: {e}");
+            Err(format!("Failed to open config store: {e}"))
+        }
+    }
+}
+
+/// Information about an available audio input device.
+#[derive(Debug, Serialize)]
+pub struct AudioDeviceInfo {
+    /// Device name as reported by the OS.
+    pub name: String,
+    /// Whether this is the current system default input device.
+    pub is_default: bool,
+}
+
+/// List all available audio input devices on this system.
+#[tauri::command]
+pub fn list_audio_devices() -> Result<Vec<AudioDeviceInfo>, String> {
+    let host = cpal::default_host();
+
+    let default_name = host
+        .default_input_device()
+        .and_then(|d| d.name().ok());
+
+    let devices = host
+        .input_devices()
+        .map_err(|e| {
+            error!("Failed to enumerate audio input devices: {e}");
+            format!("Failed to enumerate audio devices: {e}")
+        })?
+        .filter_map(|d| d.name().ok())
+        .map(|name| {
+            let is_default = default_name.as_deref() == Some(name.as_str());
+            AudioDeviceInfo { name, is_default }
+        })
+        .collect::<Vec<_>>();
+
+    debug!("Enumerated {} audio input device(s)", devices.len());
+    Ok(devices)
+}
+
+/// Persist the selected audio input device and update the live pipeline.
+///
+/// Pass `device_name = null` from the frontend to revert to the system default.
+#[tauri::command]
+pub fn set_audio_device(
+    app: AppHandle,
+    state: State<PipelineState>,
+    device_name: Option<String>,
+) -> Result<(), String> {
+    info!(
+        "Setting audio device: {}",
+        device_name.as_deref().unwrap_or("system default")
+    );
+
+    // Update the live pipeline.
+    {
+        let mut pipeline = state.0.lock().unwrap();
+        pipeline.set_selected_device(device_name.clone());
+    }
+
+    // Persist to store.
+    match app.store("config.json") {
+        Ok(store) => {
+            store.set("selected_device", serde_json::json!(device_name));
+            if let Err(e) = store.save() {
+                error!("Failed to save selected_device: {e}");
+                return Err(format!("Failed to save selected_device: {e}"));
+            }
+            info!("selected_device persisted to store");
+        }
+        Err(e) => {
+            error!("Failed to open config store for selected_device: {e}");
+            return Err(format!("Failed to open config store: {e}"));
+        }
+    }
+
+    Ok(())
+}
+
+/// Get the currently persisted audio device selection (None = system default).
+#[tauri::command]
+pub fn get_audio_device(app: AppHandle) -> Option<String> {
+    let result = app
+        .store("config.json")
+        .ok()
+        .and_then(|s| s.get("selected_device"))
+        .and_then(|v| {
+            if v.is_null() {
+                None
+            } else {
+                v.as_str().map(|s| s.to_string())
+            }
+        });
+    debug!(
+        "get_audio_device: {}",
+        result.as_deref().unwrap_or("system default")
+    );
+    result
 }

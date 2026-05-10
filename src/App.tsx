@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import Settings from "./pages/Settings";
 import History from "./pages/History";
+import Onboarding from "./pages/Onboarding";
 import RecordingOverlay from "./components/RecordingOverlay";
 import "./App.css";
 
@@ -11,7 +12,19 @@ function App() {
   const [view, setView] = useState<AppView>("main");
   const [status, setStatus] = useState("idle");
   const [lastText, _setLastText] = useState("");
-  const [configured, setConfigured] = useState(false);
+  // null = not yet checked; true/false = result from backend
+  const [onboardingDone, setOnboardingDone] = useState<boolean | null>(null);
+
+  // Check onboarding status once on mount
+  useEffect(() => {
+    invoke<boolean>("is_onboarding_completed")
+      .then((done) => setOnboardingDone(done))
+      .catch((e) => {
+        console.error("Failed to check onboarding status:", e);
+        // Treat as not completed so we show onboarding
+        setOnboardingDone(false);
+      });
+  }, []);
 
   useEffect(() => {
     // Poll status every 500ms
@@ -26,20 +39,18 @@ function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // Show settings on first run if not configured
-  useEffect(() => {
-    if (!configured) {
-      setView("settings");
-    }
-  }, [configured]);
+  // Still loading onboarding status — render nothing to avoid flash
+  if (onboardingDone === null) {
+    return null;
+  }
 
-  const handleConfigured = () => {
-    setConfigured(true);
-    setView("main");
-  };
+  // Show the onboarding wizard for first-time users
+  if (!onboardingDone) {
+    return <Onboarding onComplete={() => setOnboardingDone(true)} />;
+  }
 
   if (view === "settings") {
-    return <Settings onBack={() => setView("main")} onSave={handleConfigured} />;
+    return <Settings onBack={() => setView("main")} onSave={() => setView("main")} />;
   }
 
   if (view === "history") {

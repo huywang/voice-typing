@@ -54,7 +54,8 @@ impl LlmClient {
     ///
     /// If polishing is disabled, returns the raw text unchanged.
     /// If the API call fails, falls back to the raw text.
-    pub async fn polish(&self, raw_text: &str) -> Result<String, LlmError> {
+    /// The optional `dictionary` slice lists custom terms that must be preserved verbatim.
+    pub async fn polish(&self, raw_text: &str, dictionary: &[String]) -> Result<String, LlmError> {
         if raw_text.is_empty() {
             debug!("LLM polish: empty input, skipping");
             return Ok(String::new());
@@ -67,12 +68,23 @@ impl LlmClient {
 
         info!("LLM polish request: \"{}\"", raw_text);
 
+        // Build system prompt, appending dictionary terms when provided.
+        let system_prompt = if dictionary.is_empty() {
+            POLISH_SYSTEM_PROMPT.to_string()
+        } else {
+            let terms = dictionary.join("、");
+            format!(
+                "{}\n\n以下专有名词必须原样保留，不要修改：{}",
+                POLISH_SYSTEM_PROMPT, terms
+            )
+        };
+
         let request_body = ChatRequest {
             model: "qwen-plus".to_string(),
             messages: vec![
                 ChatMessage {
                     role: "system".to_string(),
-                    content: POLISH_SYSTEM_PROMPT.to_string(),
+                    content: system_prompt,
                 },
                 ChatMessage {
                     role: "user".to_string(),
@@ -182,7 +194,7 @@ mod tests {
     #[tokio::test]
     async fn test_polish_empty_string() {
         let client = LlmClient::new("test-key".to_string());
-        let result = client.polish("").await.unwrap();
+        let result = client.polish("", &[]).await.unwrap();
         assert_eq!(result, "");
     }
 
@@ -190,7 +202,16 @@ mod tests {
     async fn test_polish_disabled() {
         let mut client = LlmClient::new("test-key".to_string());
         client.set_enabled(false);
-        let result = client.polish("嗯那个你好").await.unwrap();
+        let result = client.polish("嗯那个你好", &[]).await.unwrap();
+        assert_eq!(result, "嗯那个你好");
+    }
+
+    #[tokio::test]
+    async fn test_polish_disabled_with_dictionary() {
+        let mut client = LlmClient::new("test-key".to_string());
+        client.set_enabled(false);
+        let dict = vec!["Tauri".to_string(), "Rust".to_string()];
+        let result = client.polish("嗯那个你好", &dict).await.unwrap();
         assert_eq!(result, "嗯那个你好");
     }
 

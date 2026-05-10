@@ -47,6 +47,16 @@ pub fn run() {
             commands::set_autostart_enabled,
             commands::get_sound_enabled,
             commands::set_sound_enabled,
+            commands::is_macos,
+            commands::get_dock_visible,
+            commands::set_dock_visible,
+            commands::is_onboarding_completed,
+            commands::complete_onboarding,
+            commands::get_dictionary,
+            commands::set_dictionary,
+            commands::list_audio_devices,
+            commands::set_audio_device,
+            commands::get_audio_device,
         ])
         .setup(|app| {
             // Initialize history database
@@ -81,6 +91,31 @@ pub fn run() {
                         .unwrap_or(true);
                     debug!("sound_enabled restored from store: {sound_enabled}");
 
+                    // Restore dock icon visibility on macOS (default: visible).
+                    #[cfg(target_os = "macos")]
+                    {
+                        use tauri::ActivationPolicy;
+                        let dock_visible = store
+                            .get("dock_visible")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(true);
+                        let policy = if dock_visible {
+                            ActivationPolicy::Regular
+                        } else {
+                            ActivationPolicy::Accessory
+                        };
+                        app.set_activation_policy(policy);
+                        debug!("dock_visible restored from store: {dock_visible}");
+                    }
+
+                    // Restore selected audio device (None = system default).
+                    let selected_device = store
+                        .get("selected_device")
+                        .and_then(|v| if v.is_null() { None } else { v.as_str().map(|s| s.to_string()) });
+                    if let Some(ref dev) = selected_device {
+                        debug!("selected_device restored from store: {dev}");
+                    }
+
                     if let Some(key) = api_key {
                         if !key.is_empty() {
                             info!(
@@ -91,11 +126,20 @@ pub fn run() {
                             let state = app.state::<PipelineState>();
                             let mut pipeline = state.0.lock().unwrap();
                             pipeline.configure(key, llm_enabled);
+                            pipeline.set_selected_device(selected_device);
                         } else {
                             debug!("Stored API key is empty, skipping restore");
+                            // Still restore device even without API key.
+                            let state = app.state::<PipelineState>();
+                            let mut pipeline = state.0.lock().unwrap();
+                            pipeline.set_selected_device(selected_device);
                         }
                     } else {
                         info!("No saved API config found (first launch)");
+                        // Still restore device even without API key.
+                        let state = app.state::<PipelineState>();
+                        let mut pipeline = state.0.lock().unwrap();
+                        pipeline.set_selected_device(selected_device);
                     }
                 }
                 Err(e) => {
@@ -219,10 +263,20 @@ pub fn run() {
                                 // Keep raw text for history before LLM may consume it.
                                 let raw_text_for_history = raw_text.clone();
 
+                                // Load personal dictionary (best-effort; empty on failure).
+                                let dictionary: Vec<String> = handle2
+                                    .store("config.json")
+                                    .ok()
+                                    .and_then(|s| {
+                                        s.get("dictionary")
+                                            .and_then(|v| serde_json::from_value(v).ok())
+                                    })
+                                    .unwrap_or_default();
+
                                 // LLM polish
                                 let final_text = if let Some(llm) = &llm_client {
                                     let llm_start = Instant::now();
-                                    match llm.polish(&raw_text).await {
+                                    match llm.polish(&raw_text, &dictionary).await {
                                         Ok(p) => {
                                             if p != raw_text {
                                                 info!(
@@ -266,9 +320,12 @@ pub fn run() {
                                             );
                                             // Play stop sound on successful injection.
                                             sound::play_stop(sound_on);
-                                            // Cache for "paste last transcription" shortcut.
+                                            // Cache raw and polished text for re-inject / AI-revert shortcuts.
                                             let pipeline = state.0.lock().unwrap();
-                                            pipeline.set_last_transcription(final_text.clone());
+                                            pipeline.set_last_transcription(
+                                                raw_text_for_history.clone(),
+                                                final_text.clone(),
+                                            );
                                             injection_ok = true;
                                         }
                                     }
@@ -355,6 +412,56 @@ pub fn run() {
             )?;
 
             info!("Global shortcut registered: CmdOrCtrl+Alt+V (paste last transcription)");
+
+            // Tertiary hotkey: AI revert — inject raw ASR text (undoing LLM polish).
+            // CmdOrCtrl+Alt+Z on all platforms.
+            let handle3 = app.handle().clone();
+            app.global_shortcut().on_shortcut(
+                "CmdOrCtrl+Alt+Z",
+                move |_app, _shortcut, event| {
+                    if event.state != ShortcutState::Pressed {
+                        return;
+                    }
+                    info!("AI-revert hotkey pressed — injecting raw ASR text");
+                    let state = handle3.state::<PipelineState>();
+                    let (raw, polished) = {
+                        let pipeline = state.0.lock().unwrap();
+                        (
+                            pipeline.last_raw_transcription(),
+                            pipeline.last_transcription(),
+                        )
+                    };
+                    match raw {
+                        Some(raw_text) => {
+                            let polished_text = polished.unwrap_or_default();
+                            info!(
+                                "AI revert: polished=\"{}\" -> raw=\"{}\"",
+                                polished_text, raw_text
+                            );
+                            match injector::TextInjector::new() {
+                                Ok(mut inj) => {
+                                    if let Err(e) = inj.inject(&raw_text) {
+                                        error!("Failed to inject raw ASR text (AI revert): {e}");
+                                    } else {
+                                        info!(
+                                            "AI revert injected raw text ({} chars)",
+                                            raw_text.len()
+                                        );
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("Failed to init injector for AI revert: {e}");
+                                }
+                            }
+                        }
+                        None => {
+                            warn!("No previous transcription cached — nothing to revert");
+                        }
+                    }
+                },
+            )?;
+
+            info!("Global shortcut registered: CmdOrCtrl+Alt+Z (AI revert)");
             Ok(())
         })
         .run(tauri::generate_context!())

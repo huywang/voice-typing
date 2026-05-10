@@ -1,6 +1,6 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, Stream, StreamConfig};
-use log::{debug, info};
+use log::{debug, info, warn};
 use std::sync::{Arc, Mutex};
 
 use super::wav::encode_wav;
@@ -133,12 +133,39 @@ pub struct AudioRecorder {
 }
 
 impl AudioRecorder {
-    /// Create a new `AudioRecorder` using the default input device.
-    pub fn new(buffer: RecordingBuffer) -> Result<Self, AudioError> {
+    /// Create a new `AudioRecorder`.
+    ///
+    /// If `device_name` is `Some`, it will attempt to find and use that named
+    /// input device. If the named device is not found, it falls back to the
+    /// system default with a warning. If `device_name` is `None`, the system
+    /// default input device is used.
+    pub fn new(buffer: RecordingBuffer, device_name: Option<&str>) -> Result<Self, AudioError> {
         let host = cpal::default_host();
-        let device = host
-            .default_input_device()
-            .ok_or(AudioError::NoInputDevice)?;
+
+        // Resolve device: try the requested name first, fall back to default.
+        let device = match device_name {
+            Some(name) => {
+                let found = host
+                    .input_devices()
+                    .map_err(|e| AudioError::ConfigError(format!("Failed to enumerate devices: {e}")))?
+                    .find(|d| d.name().map(|n| n == name).unwrap_or(false));
+
+                match found {
+                    Some(d) => {
+                        info!("Using selected audio device: \"{}\"", name);
+                        d
+                    }
+                    None => {
+                        warn!(
+                            "Audio device \"{}\" not found, falling back to system default",
+                            name
+                        );
+                        host.default_input_device().ok_or(AudioError::NoInputDevice)?
+                    }
+                }
+            }
+            None => host.default_input_device().ok_or(AudioError::NoInputDevice)?,
+        };
 
         let config = device.default_input_config().map_err(|e| {
             AudioError::ConfigError(format!("Failed to get default input config: {e}"))

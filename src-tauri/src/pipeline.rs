@@ -27,14 +27,25 @@ impl AudioThread {
     }
 }
 
+/// Holds both the raw ASR output and the LLM-polished version for a single transcription.
+#[derive(Clone, Debug)]
+pub struct LastTranscription {
+    /// Raw text as returned by ASR (before LLM polish).
+    pub raw: String,
+    /// Final text that was injected (may equal `raw` if LLM is disabled or failed).
+    pub polished: String,
+}
+
 /// Central pipeline that coordinates recording -> ASR -> LLM -> injection.
 pub struct Pipeline {
     audio_thread: Option<AudioThread>,
     asr_client: Option<AsrClient>,
     llm_client: Option<LlmClient>,
     status: Arc<Mutex<AppStatus>>,
-    /// Cache of the most recent successfully injected transcription.
-    last_transcription: Arc<Mutex<Option<String>>>,
+    /// Cache of the most recent successfully injected transcription (both raw and polished).
+    last_transcription: Arc<Mutex<Option<LastTranscription>>>,
+    /// User-selected audio input device name. None means system default.
+    selected_device: Option<String>,
 }
 
 // Safety: The non-Send AudioRecorder lives inside a dedicated thread.
@@ -51,6 +62,7 @@ impl Pipeline {
             llm_client: None,
             status: Arc::new(Mutex::new(AppStatus::Idle)),
             last_transcription: Arc::new(Mutex::new(None)),
+            selected_device: None,
         }
     }
 
@@ -87,6 +99,24 @@ impl Pipeline {
         self.audio_thread.as_ref()
     }
 
+    /// Set the preferred audio input device by name.
+    ///
+    /// Drops the current audio thread so the next recording uses the new device.
+    pub fn set_selected_device(&mut self, device: Option<String>) {
+        info!(
+            "Selected audio device changed to: {}",
+            device.as_deref().unwrap_or("system default")
+        );
+        self.selected_device = device;
+        // Drop existing audio thread so it is re-created with the new device on next use.
+        self.audio_thread = None;
+    }
+
+    /// Get the currently selected device name (None = system default).
+    pub fn selected_device(&self) -> Option<&str> {
+        self.selected_device.as_deref()
+    }
+
     fn ensure_audio_thread(&mut self) -> Result<(), String> {
         if self.audio_thread.is_some() {
             return Ok(());
@@ -95,9 +125,11 @@ impl Pipeline {
         info!("Initializing audio thread...");
         let buffer = RecordingBuffer::new();
         let buffer_clone = buffer.clone();
+        // Clone the device name so it can be moved into the spawned thread.
+        let device_name = self.selected_device.clone();
 
         let handle = thread::spawn(move || {
-            let _recorder = match AudioRecorder::new(buffer_clone) {
+            let _recorder = match AudioRecorder::new(buffer_clone, device_name.as_deref()) {
                 Ok(r) => {
                     info!("AudioRecorder initialized on dedicated thread");
                     r
@@ -124,15 +156,32 @@ impl Pipeline {
         Ok(())
     }
 
-    /// Cache the most recently injected transcription text.
-    pub fn set_last_transcription(&self, text: String) {
-        debug!("Caching last transcription ({} chars)", text.len());
-        *self.last_transcription.lock().unwrap() = Some(text);
+    /// Cache the most recently injected transcription (both raw and polished text).
+    pub fn set_last_transcription(&self, raw: String, polished: String) {
+        debug!(
+            "Caching last transcription: raw={} chars, polished={} chars",
+            raw.len(),
+            polished.len()
+        );
+        *self.last_transcription.lock().unwrap() = Some(LastTranscription { raw, polished });
     }
 
-    /// Return the most recently cached transcription, if any.
+    /// Return the polished text from the most recently cached transcription, if any.
     pub fn last_transcription(&self) -> Option<String> {
-        self.last_transcription.lock().unwrap().clone()
+        self.last_transcription
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|t| t.polished.clone())
+    }
+
+    /// Return the raw ASR text from the most recently cached transcription, if any.
+    pub fn last_raw_transcription(&self) -> Option<String> {
+        self.last_transcription
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|t| t.raw.clone())
     }
 
     pub fn start_recording(&mut self) -> Result<(), String> {
@@ -170,5 +219,15 @@ mod tests {
         assert_eq!(pipeline.status(), AppStatus::Recording);
         pipeline.set_status(AppStatus::Processing);
         assert_eq!(pipeline.status(), AppStatus::Processing);
+    }
+
+    #[test]
+    fn test_set_selected_device() {
+        let mut pipeline = Pipeline::new();
+        assert!(pipeline.selected_device().is_none());
+        pipeline.set_selected_device(Some("Test Mic".to_string()));
+        assert_eq!(pipeline.selected_device(), Some("Test Mic"));
+        pipeline.set_selected_device(None);
+        assert!(pipeline.selected_device().is_none());
     }
 }
