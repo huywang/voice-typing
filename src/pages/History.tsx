@@ -145,7 +145,11 @@ function History({ onBack }: HistoryProps) {
       )}
 
       {records.length === 0 && !loading && (
-        <p className="empty-hint">No transcription history yet.</p>
+        <p className="empty-hint">
+          No transcription history yet.
+          <br />
+          Use the hotkey to start your first voice input.
+        </p>
       )}
 
       <div className="history-list">

@@ -72,6 +72,10 @@ fn show_floating_bar(app: &AppHandle) {
             (_, Err(e)) => warn!("Failed to get cursor position: {e}"),
         }
 
+        // Force always-on-top on every show to ensure the bar stays above
+        // fullscreen apps and other windows that may have taken focus.
+        let _ = win.set_always_on_top(true);
+
         if let Err(e) = win.show() {
             warn!("Failed to show floating-bar window: {e}");
         } else {

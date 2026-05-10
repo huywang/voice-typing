@@ -1,6 +1,6 @@
 /* ============================================================
-   FloatingBar — Premium glassmorphism recording status
-   Rendered inside the dedicated "floating-bar" Tauri window.
+   FloatingBar — Premium glassmorphism with gradient waveform
+   Inspired by Wispr Flow + macOS Dictation (Liquid Glass)
    ============================================================ */
 
 /* Reset body for transparent window */
@@ -21,10 +21,11 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  padding: 12px 22px;
-  border-radius: 40px;
-  font-size: 13px;
+  gap: 8px;
+  padding: 0 16px;
+  height: 36px;
+  border-radius: 20px;
+  font-size: 12px;
   font-weight: 500;
   line-height: 1;
   -webkit-font-smoothing: antialiased;
@@ -34,16 +35,15 @@ body {
   inset: 0;
   margin: auto;
   width: fit-content;
-  height: fit-content;
 
   /* Enter animation */
-  animation: bar-enter 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  animation: bar-enter 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
 
 @keyframes bar-enter {
   from {
     opacity: 0;
-    transform: scale(0.85) translateY(4px);
+    transform: scale(0.88) translateY(3px);
   }
   to {
     opacity: 1;
@@ -57,54 +57,154 @@ body {
   pointer-events: none;
 }
 
-/* ── Recording State ─────────────────────────────────────── */
+/* ── Recording State — Gradient Waveform ─────────────────── */
 .floating-bar--recording {
+  background: rgba(15, 15, 15, 0.85);
+  color: #ffffff;
+  backdrop-filter: blur(24px) saturate(1.6);
+  -webkit-backdrop-filter: blur(24px) saturate(1.6);
+  box-shadow:
+    0 6px 24px rgba(0, 0, 0, 0.35),
+    0 2px 6px rgba(0, 0, 0, 0.2),
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.1);
+  border: 0.5px solid rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+/* Animated gradient border glow for recording */
+.floating-bar--recording::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: 21px;
+  padding: 1px;
+  background: linear-gradient(
+    90deg,
+    #ff6b35,
+    #ff3b30,
+    #ff6b35,
+    #ffb347,
+    #ff6b35
+  );
+  background-size: 300% 100%;
+  animation: gradient-flow 2s ease-in-out infinite;
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0.8;
+}
+
+/* ── Audio Waveform Bars (recording) ─────────────────────── */
+.floating-waveform {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 16px;
+}
+
+.floating-waveform-bar {
+  width: 2.5px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #ff6b35, #ff3b30);
+  animation: waveform-bounce 1.2s ease-in-out infinite;
+}
+
+.floating-waveform-bar:nth-child(1) { height: 6px; animation-delay: 0s; }
+.floating-waveform-bar:nth-child(2) { height: 10px; animation-delay: 0.1s; }
+.floating-waveform-bar:nth-child(3) { height: 14px; animation-delay: 0.2s; }
+.floating-waveform-bar:nth-child(4) { height: 8px; animation-delay: 0.3s; }
+.floating-waveform-bar:nth-child(5) { height: 12px; animation-delay: 0.15s; }
+
+@keyframes waveform-bounce {
+  0%, 100% {
+    transform: scaleY(0.4);
+    opacity: 0.6;
+  }
+  50% {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+}
+
+/* ── Processing State — Shimmer Effect ───────────────────── */
+.floating-bar--processing {
   background: rgba(15, 15, 15, 0.82);
   color: #ffffff;
   backdrop-filter: blur(24px) saturate(1.5);
   -webkit-backdrop-filter: blur(24px) saturate(1.5);
   box-shadow:
-    0 8px 32px rgba(0, 0, 0, 0.35),
-    0 2px 8px rgba(0, 0, 0, 0.2),
-    inset 0 0.5px 0 rgba(255, 255, 255, 0.08);
-  border: 0.5px solid rgba(255, 255, 255, 0.06);
+    0 6px 24px rgba(0, 0, 0, 0.3),
+    0 2px 6px rgba(0, 0, 0, 0.15),
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.1);
+  border: 0.5px solid rgba(255, 255, 255, 0.08);
+  overflow: hidden;
 }
 
-/* ── Processing State ────────────────────────────────────── */
-.floating-bar--processing {
-  background: rgba(15, 15, 15, 0.78);
-  color: #ffffff;
-  backdrop-filter: blur(24px) saturate(1.5);
-  -webkit-backdrop-filter: blur(24px) saturate(1.5);
-  box-shadow:
-    0 8px 32px rgba(0, 0, 0, 0.3),
-    0 2px 8px rgba(0, 0, 0, 0.15),
-    inset 0 0.5px 0 rgba(255, 255, 255, 0.08);
-  border: 0.5px solid rgba(255, 255, 255, 0.06);
+/* Animated gradient border glow for processing */
+.floating-bar--processing::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: 21px;
+  padding: 1px;
+  background: linear-gradient(
+    90deg,
+    #667eea,
+    #764ba2,
+    #667eea,
+    #a855f7,
+    #667eea
+  );
+  background-size: 300% 100%;
+  animation: gradient-flow 1.8s ease-in-out infinite;
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0.85;
 }
 
-/* ── Status Dot ──────────────────────────────────────────── */
-.floating-dot {
-  display: inline-block;
-  width: 10px;
-  height: 10px;
+/* Shimmer sweep inside processing bar */
+.floating-bar--processing::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 20px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(102, 126, 234, 0.08) 40%,
+    rgba(118, 75, 162, 0.12) 50%,
+    rgba(102, 126, 234, 0.08) 60%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer-sweep 1.5s ease-in-out infinite;
+}
+
+@keyframes gradient-flow {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+@keyframes shimmer-sweep {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ── Processing Spinner (replaces dot) ───────────────────── */
+.floating-spinner {
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
+  border: 2px solid rgba(102, 126, 234, 0.3);
+  border-top-color: #a855f7;
+  animation: float-dot-spin 0.7s linear infinite;
   flex-shrink: 0;
-}
-
-/* Pulsing red dot for recording */
-.floating-dot--recording {
-  background: #ff3b30;
-  box-shadow: 0 0 0 3px rgba(255, 59, 48, 0.25);
-  animation: float-dot-pulse 1.5s ease-in-out infinite;
-}
-
-/* Spinning ring for processing */
-.floating-dot--processing {
-  background: transparent;
-  border: 2px solid #ff9f0a;
-  border-top-color: transparent;
-  animation: float-dot-spin 0.65s linear infinite;
 }
 
 /* ── Label ───────────────────────────────────────────────── */
@@ -112,22 +212,11 @@ body {
   letter-spacing: 0.02em;
   white-space: nowrap;
   font-weight: 500;
+  position: relative;
+  z-index: 1;
 }
 
 /* ── Animations ──────────────────────────────────────────── */
-@keyframes float-dot-pulse {
-  0%, 100% {
-    opacity: 1;
-    transform: scale(1);
-    box-shadow: 0 0 0 3px rgba(255, 59, 48, 0.25);
-  }
-  50% {
-    opacity: 0.5;
-    transform: scale(0.8);
-    box-shadow: 0 0 0 6px rgba(255, 59, 48, 0.08);
-  }
-}
-
 @keyframes float-dot-spin {
   to { transform: rotate(360deg); }
 }
@@ -139,20 +228,21 @@ body {
   backdrop-filter: blur(28px) saturate(1.6);
   -webkit-backdrop-filter: blur(28px) saturate(1.6);
   box-shadow:
-    0 12px 40px rgba(0, 0, 0, 0.4),
-    0 3px 10px rgba(0, 0, 0, 0.2),
+    0 8px 32px rgba(0, 0, 0, 0.4),
+    0 2px 8px rgba(0, 0, 0, 0.2),
     inset 0 0.5px 0 rgba(255, 255, 255, 0.1);
   border: 0.5px solid rgba(255, 255, 255, 0.08);
-  gap: 12px;
-  max-width: 440px;
-  padding: 11px 16px;
-  border-radius: 30px;
+  gap: 10px;
+  max-width: 260px;
+  height: auto;
+  padding: 8px 14px;
+  border-radius: 20px;
 }
 
 /* Green checkmark */
 .floating-result-icon {
   color: #34c759;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
   flex-shrink: 0;
 }
@@ -163,7 +253,7 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
+  font-size: 12px;
   opacity: 0.88;
   min-width: 0;
 }
@@ -171,18 +261,18 @@ body {
 /* Action buttons */
 .floating-result-actions {
   display: flex;
-  gap: 6px;
+  gap: 4px;
   flex-shrink: 0;
 }
 
 .floating-btn {
   border: none;
-  border-radius: 8px;
+  border-radius: 6px;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 500;
   line-height: 1;
-  padding: 5px 12px;
+  padding: 4px 10px;
   transition: all 0.15s ease;
 }
 
@@ -209,7 +299,7 @@ body {
 .floating-btn--dismiss {
   background: rgba(255, 255, 255, 0.08);
   color: rgba(255, 255, 255, 0.6);
-  padding: 5px 9px;
+  padding: 4px 7px;
 }
 
 .floating-btn--dismiss:hover {
@@ -218,11 +308,10 @@ body {
 }
 
 /* ── Mode support ────────────────────────────────────────── */
-/* Use dark pill in both modes for universal wallpaper contrast */
 @media (prefers-color-scheme: light) {
   .floating-bar--recording,
   .floating-bar--processing {
-    background: rgba(25, 25, 25, 0.85);
+    background: rgba(25, 25, 25, 0.88);
   }
   .floating-bar--result {
     background: rgba(25, 25, 25, 0.9);

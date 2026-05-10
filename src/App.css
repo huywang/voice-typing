@@ -162,7 +162,10 @@ h1 {
   font-size: 1.4em;
   font-weight: 700;
   letter-spacing: -0.02em;
-  color: var(--text-primary);
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 /* ── Status Indicator ────────────────────────────────────── */
@@ -194,32 +197,32 @@ h1 {
 }
 
 .status-dot.idle {
-  background: var(--status-idle);
+  background: linear-gradient(135deg, #34c759, #30d158);
   box-shadow: 0 0 0 3px rgba(52, 199, 89, 0.2);
 }
 
 .status-dot.recording {
-  background: var(--status-recording);
-  box-shadow: 0 0 0 3px rgba(255, 59, 48, 0.2);
+  background: linear-gradient(135deg, #ff6b35, #ff3b30);
+  box-shadow: 0 0 0 3px rgba(255, 59, 48, 0.25);
   animation: pulse-recording 1.5s ease-in-out infinite;
 }
 
 .status-dot.processing {
-  background: var(--status-processing);
-  box-shadow: 0 0 0 3px rgba(255, 159, 10, 0.2);
-  animation: pulse-processing 1s ease-in-out infinite;
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.25);
+  animation: pulse-processing 1.2s ease-in-out infinite;
 }
 
 @keyframes pulse-recording {
   0%, 100% {
     opacity: 1;
     transform: scale(1);
-    box-shadow: 0 0 0 3px rgba(255, 59, 48, 0.2);
+    box-shadow: 0 0 0 3px rgba(255, 107, 53, 0.25);
   }
   50% {
-    opacity: 0.7;
-    transform: scale(1.15);
-    box-shadow: 0 0 0 6px rgba(255, 59, 48, 0.1);
+    opacity: 0.8;
+    transform: scale(1.2);
+    box-shadow: 0 0 0 8px rgba(255, 59, 48, 0.08);
   }
 }
 
@@ -227,10 +230,12 @@ h1 {
   0%, 100% {
     opacity: 1;
     transform: scale(1);
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.25);
   }
   50% {
-    opacity: 0.5;
-    transform: scale(0.9);
+    opacity: 0.7;
+    transform: scale(0.85);
+    box-shadow: 0 0 0 6px rgba(118, 75, 162, 0.12);
   }
 }
 
@@ -341,17 +346,17 @@ button:disabled {
 }
 
 button.primary {
-  background: var(--accent);
+  background: linear-gradient(135deg, #667eea, #764ba2);
   color: white;
-  border-color: var(--accent);
-  box-shadow: var(--shadow-sm), 0 2px 8px rgba(0, 122, 255, 0.2);
+  border-color: transparent;
+  box-shadow: var(--shadow-sm), 0 2px 12px rgba(102, 126, 234, 0.3);
 }
 
 button.primary:hover {
-  background: var(--accent-hover);
-  border-color: var(--accent-hover);
+  background: linear-gradient(135deg, #5a72d4, #6a4296);
+  border-color: transparent;
   color: white;
-  box-shadow: var(--shadow-md), 0 4px 12px rgba(0, 122, 255, 0.25);
+  box-shadow: var(--shadow-md), 0 4px 16px rgba(102, 126, 234, 0.35);
   transform: translateY(-0.5px);
 }
 
@@ -376,8 +381,16 @@ button.danger:hover {
 
 /* ── Settings Form ───────────────────────────────────────── */
 .settings .form-group {
-  margin-bottom: 22px;
+  margin-bottom: 24px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--border-muted);
   text-align: left;
+}
+
+.settings .form-group:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
 }
 
 .settings label {
@@ -406,6 +419,7 @@ button.danger:hover {
 .settings input:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--border-focus), var(--shadow-xs);
+  transform: translateY(-0.5px);
 }
 
 .settings input::placeholder {
@@ -463,12 +477,47 @@ button.danger:hover {
   padding: 2px 0;
 }
 
+/* Custom toggle switch instead of native checkbox */
 .checkbox-label input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 38px;
+  height: 22px;
+  background: var(--border-strong);
+  border-radius: 11px;
+  position: relative;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  flex-shrink: 0;
+  border: none;
+  outline: none;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.checkbox-label input[type="checkbox"]::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
   width: 18px;
   height: 18px;
-  accent-color: var(--accent);
-  border-radius: 4px;
-  cursor: pointer;
+  border-radius: 50%;
+  background: white;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.checkbox-label input[type="checkbox"]:checked {
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.checkbox-label input[type="checkbox"]:checked::after {
+  transform: translateX(16px);
+}
+
+.checkbox-label input[type="checkbox"]:focus-visible {
+  box-shadow: 0 0 0 3px var(--border-focus), inset 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
 .error {
@@ -519,13 +568,13 @@ button.danger:hover {
 }
 
 .overlay-dot.recording {
-  background: var(--status-recording);
+  background: linear-gradient(135deg, #ff6b35, #ff3b30);
   animation: pulse-recording 1.5s ease-in-out infinite;
 }
 
 .overlay-dot.processing {
-  background: var(--status-processing);
-  animation: pulse-processing 1s ease-in-out infinite;
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  animation: pulse-processing 1.2s ease-in-out infinite;
 }
 
 /* ── History Page ────────────────────────────────────────── */
@@ -533,7 +582,12 @@ button.danger:hover {
   text-align: center;
   color: var(--text-muted);
   font-size: 0.9em;
-  padding: 40px 0;
+  padding: 60px 20px;
+  line-height: 1.8;
+  background: var(--bg-secondary);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-lg);
+  margin-top: 16px;
 }
 
 .history-list {
@@ -701,9 +755,9 @@ button.danger:hover {
 }
 
 .onboarding-dot.active {
-  background: var(--accent);
+  background: linear-gradient(135deg, #667eea, #764ba2);
   transform: scale(1.4);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.2);
 }
 
 .onboarding-dot.done {
@@ -1003,6 +1057,11 @@ button.danger:hover {
   background: var(--bg-secondary);
   box-shadow: var(--shadow-sm);
   font-weight: 600;
+  border-bottom: 2px solid transparent;
+  background-image: linear-gradient(var(--bg-secondary), var(--bg-secondary)),
+    linear-gradient(135deg, #667eea, #764ba2);
+  background-origin: border-box;
+  background-clip: padding-box, border-box;
 }
 
 .tab-panel {

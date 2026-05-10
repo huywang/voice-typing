@@ -72,10 +72,16 @@ function App() {
         </span>
       </div>
 
-      {lastText && (
+      {lastText ? (
         <div className="last-text">
-          <p className="label">Last transcription:</p>
+          <p className="label">Last transcription</p>
           <p className="text">{lastText}</p>
+        </div>
+      ) : (
+        <div className="last-text" style={{ textAlign: "center", opacity: 0.6 }}>
+          <p className="text" style={{ color: "var(--text-muted)", fontSize: "0.85em" }}>
+            Press the hotkey to start your first voice input
+          </p>
         </div>
       )}
 
@@ -85,7 +91,7 @@ function App() {
       </div>
 
       <p className="hint">
-        Use <kbd>Ctrl+Shift+Space</kbd> (or <kbd>Cmd+Shift+Space</kbd> on Mac) to start voice input
+        Press <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd> to start voice input
       </p>
     </main>
   );

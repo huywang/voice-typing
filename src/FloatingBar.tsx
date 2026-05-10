@@ -154,9 +154,19 @@ function FloatingBar() {
 
   return (
     <div className={`floating-bar floating-bar--${status}`}>
-      <span className={`floating-dot floating-dot--${status}`} />
+      {isRecording ? (
+        <div className="floating-waveform">
+          <span className="floating-waveform-bar" />
+          <span className="floating-waveform-bar" />
+          <span className="floating-waveform-bar" />
+          <span className="floating-waveform-bar" />
+          <span className="floating-waveform-bar" />
+        </div>
+      ) : (
+        <span className="floating-spinner" />
+      )}
       <span className="floating-label">
-        {isRecording ? "Recording..." : "Processing..."}
+        {isRecording ? "Listening..." : "Thinking..."}
       </span>
     </div>
   );
