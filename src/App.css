@@ -453,7 +453,7 @@ button.danger:hover {
   font-weight: 500;
 }
 
-/* ── Recording Overlay ───────────────────────────────────── */
+/* ── Recording Overlay (豆包风格浮动胶囊) ──────────────── */
 .recording-overlay {
   position: fixed;
   top: 12px;
@@ -462,17 +462,22 @@ button.danger:hover {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 14px;
-  border-radius: var(--radius-pill);
-  background: rgba(0, 0, 0, 0.75);
-  backdrop-filter: blur(20px) saturate(1.8);
-  -webkit-backdrop-filter: blur(20px) saturate(1.8);
+  padding: 0 14px;
+  height: 32px;
+  border-radius: 100px;
+  background: rgba(30, 30, 30, 0.88);
+  backdrop-filter: blur(24px) saturate(1.8);
+  -webkit-backdrop-filter: blur(24px) saturate(1.8);
+  box-shadow:
+    0 2px 12px rgba(0, 0, 0, 0.3),
+    0 0.5px 2px rgba(0, 0, 0, 0.15);
+  border: 0.5px solid rgba(255, 255, 255, 0.1);
   color: white;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
   z-index: 9999;
   pointer-events: none;
-  animation: overlay-enter 0.2s ease-out;
+  animation: overlay-enter 0.15s ease-out;
 }
 
 @keyframes overlay-enter {
@@ -486,20 +491,49 @@ button.danger:hover {
   }
 }
 
-.overlay-dot {
-  width: 6px;
-  height: 6px;
+.overlay-label {
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+
+/* Audio waveform: 4 white bars with staggered bounce */
+.overlay-waveform {
+  display: flex;
+  align-items: center;
+  gap: 2.5px;
+  height: 16px;
+}
+
+.overlay-wave-bar {
+  width: 2.5px;
+  border-radius: 1.5px;
+  background: #ffffff;
+  animation: overlay-wave 0.8s ease-in-out infinite;
+}
+
+.overlay-wave-bar:nth-child(1) { height: 6px;  animation-delay: 0s; }
+.overlay-wave-bar:nth-child(2) { height: 12px; animation-delay: 0.15s; }
+.overlay-wave-bar:nth-child(3) { height: 16px; animation-delay: 0.05s; }
+.overlay-wave-bar:nth-child(4) { height: 9px;  animation-delay: 0.25s; }
+
+@keyframes overlay-wave {
+  0%, 100% { transform: scaleY(0.35); }
+  50% { transform: scaleY(1); }
+}
+
+/* Processing spinner */
+.overlay-spinner {
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-top-color: #ffffff;
+  animation: overlay-spin 0.6s linear infinite;
+  flex-shrink: 0;
 }
 
-.overlay-dot.recording {
-  background: var(--system-red);
-  animation: pulse-subtle 1.5s ease-in-out infinite;
-}
-
-.overlay-dot.processing {
-  background: var(--system-orange);
-  animation: pulse-subtle 1.2s ease-in-out infinite;
+@keyframes overlay-spin {
+  to { transform: rotate(360deg); }
 }
 
 /* ── History Page ────────────────────────────────────────── */

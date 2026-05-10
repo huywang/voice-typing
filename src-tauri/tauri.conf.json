@@ -21,7 +21,7 @@
       {
         "label": "floating-bar",
         "title": "",
-        "url": "index.html?view=floating",
+        "url": "/?view=floating",
         "width": 280,
         "height": 40,
         "decorations": false,
