@@ -1,5 +1,8 @@
+use log::{debug, error, info, warn};
 use std::sync::Mutex;
-use tauri::State;
+use std::time::Instant;
+use tauri::{AppHandle, State};
+use tauri_plugin_store::StoreExt;
 
 use crate::pipeline::{AppStatus, Pipeline};
 
@@ -18,15 +21,35 @@ pub fn get_status(state: State<PipelineState>) -> String {
     }
 }
 
-/// Configure API keys.
+/// Configure API keys and persist to store.
 #[tauri::command]
 pub fn set_api_config(
+    app: AppHandle,
     state: State<PipelineState>,
     api_key: String,
     llm_enabled: bool,
 ) -> Result<(), String> {
+    info!("Configuring API: llm_enabled={}", llm_enabled);
     let mut pipeline = state.0.lock().unwrap();
-    pipeline.configure(api_key, llm_enabled);
+    pipeline.configure(api_key.clone(), llm_enabled);
+
+    // Persist to store
+    match app.store("config.json") {
+        Ok(store) => {
+            store.set("api_key", serde_json::json!(api_key));
+            store.set("llm_enabled", serde_json::json!(llm_enabled));
+            if let Err(e) = store.save() {
+                error!("Failed to save config store: {e}");
+                return Err(format!("Failed to save config: {e}"));
+            }
+            info!("API config persisted to store");
+        }
+        Err(e) => {
+            error!("Failed to open config store: {e}");
+            return Err(format!("Failed to open config store: {e}"));
+        }
+    }
+
     Ok(())
 }
 
@@ -43,8 +66,11 @@ pub fn start_recording(state: State<PipelineState>) -> Result<(), String> {
 /// then perform async operations without holding the MutexGuard.
 #[tauri::command]
 pub async fn stop_and_process(state: State<'_, PipelineState>) -> Result<String, String> {
+    let pipeline_start = Instant::now();
+    info!("stop_and_process command invoked");
+
     // Extract what we need from the pipeline under lock, then drop it.
-    let (samples, asr_client, llm_client) = {
+    let (wav_result, asr_client, llm_client) = {
         let pipeline = state.0.lock().unwrap();
 
         let audio = pipeline
@@ -54,50 +80,83 @@ pub async fn stop_and_process(state: State<'_, PipelineState>) -> Result<String,
         audio.buffer().stop();
         pipeline.set_status(AppStatus::Processing);
 
-        let samples = audio.buffer().samples();
-        if samples.is_empty() {
-            pipeline.set_status(AppStatus::Idle);
-            return Err("No audio data recorded".to_string());
-        }
+        // get_wav_data handles mono mixing + resampling to 16kHz
+        let wav = audio.buffer().get_wav_data();
 
         (
-            samples,
+            wav,
             pipeline.asr_client().cloned(),
             pipeline.llm_client().cloned(),
         )
     };
     // MutexGuard is dropped here.
 
-    // Encode WAV
-    let wav_data = crate::audio::encode_wav(&samples, 16000)
-        .map_err(|e| format!("WAV encoding failed: {e}"))?;
+    // Encode WAV (with proper resampling)
+    let wav_data = wav_result.map_err(|e| {
+        warn!("WAV encoding failed: {e}");
+        let pipeline = state.0.lock().unwrap();
+        pipeline.set_status(AppStatus::Idle);
+        format!("WAV encoding failed: {e}")
+    })?;
+
+    info!("WAV encoded: {} bytes", wav_data.len());
 
     // ASR
     let asr = asr_client.ok_or("ASR not configured. Please set your API key.")?;
+    let asr_start = Instant::now();
     let raw_text = asr
         .recognize(&wav_data)
         .await
-        .map_err(|e| format!("ASR failed: {e}"))?;
+        .map_err(|e| {
+            error!("ASR failed: {e}");
+            format!("ASR failed: {e}")
+        })?;
+    info!(
+        "ASR completed in {:.1}s: \"{}\"",
+        asr_start.elapsed().as_secs_f64(),
+        raw_text
+    );
 
     // LLM polishing (with fallback)
     let final_text = if let Some(llm) = &llm_client {
+        let llm_start = Instant::now();
         match llm.polish(&raw_text).await {
-            Ok(polished) => polished,
+            Ok(polished) => {
+                info!(
+                    "LLM polished in {:.1}s: \"{}\"",
+                    llm_start.elapsed().as_secs_f64(),
+                    polished
+                );
+                polished
+            }
             Err(e) => {
-                eprintln!("LLM polishing failed, using raw text: {e}");
+                warn!("LLM polishing failed, using raw text: {e}");
                 raw_text
             }
         }
     } else {
+        debug!("LLM disabled, skipping polish");
         raw_text
     };
 
     // Inject text
     let mut injector = crate::injector::TextInjector::new()
-        .map_err(|e| format!("Failed to init text injector: {e}"))?;
+        .map_err(|e| {
+            error!("Failed to init text injector: {e}");
+            format!("Failed to init text injector: {e}")
+        })?;
     injector
         .inject(&final_text)
-        .map_err(|e| format!("Failed to inject text: {e}"))?;
+        .map_err(|e| {
+            error!("Failed to inject text: {e}");
+            format!("Failed to inject text: {e}")
+        })?;
+
+    info!(
+        "Pipeline (command) completed in {:.1}s, injected {} chars",
+        pipeline_start.elapsed().as_secs_f64(),
+        final_text.len()
+    );
 
     // Update status
     {

@@ -1,15 +1,16 @@
 use base64::Engine;
+use log::{debug, info, warn};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
-/// Alibaba Cloud Paraformer ASR API endpoint.
+/// DashScope OpenAI-compatible endpoint for Qwen-ASR.
 const DASHSCOPE_ASR_URL: &str =
-    "https://dashscope.aliyuncs.com/api/v1/services/audio/asr/transcription";
+    "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions";
 
-/// Client for Alibaba Cloud's Paraformer speech recognition service.
+/// Client for Alibaba Cloud Qwen-ASR speech recognition service.
 ///
-/// Uses the DashScope API to transcribe audio to text. Supports Chinese
-/// and English recognition.
+/// Uses the DashScope OpenAI-compatible API with Qwen3-ASR-Flash model.
+/// Supports Chinese and English recognition via base64 audio input.
 #[derive(Clone)]
 pub struct AsrClient {
     api_key: String,
@@ -27,23 +28,34 @@ impl AsrClient {
 
     /// Recognize speech from WAV audio data.
     ///
-    /// Sends the audio to Alibaba Cloud Paraformer and returns the
-    /// transcribed text.
+    /// Sends the audio as base64 to Qwen-ASR via the OpenAI-compatible API.
     pub async fn recognize(&self, wav_data: &[u8]) -> Result<String, AsrError> {
         if wav_data.is_empty() {
             return Err(AsrError::EmptyAudio);
         }
 
-        // Encode audio as base64 for the API request
+        // Encode audio as base64 data URL
         let audio_base64 = base64::engine::general_purpose::STANDARD.encode(wav_data);
+        let data_url = format!("data:audio/wav;base64,{audio_base64}");
 
-        let request_body = AsrRequest {
-            model: "paraformer-realtime-v2".to_string(),
-            input: AsrInput {
-                audio: audio_base64,
-                format: "wav".to_string(),
-                sample_rate: 16000,
-            },
+        info!(
+            "ASR request: {} bytes WAV -> {} bytes base64",
+            wav_data.len(),
+            audio_base64.len()
+        );
+
+        let request_body = ChatRequest {
+            model: "qwen3-asr-flash".to_string(),
+            messages: vec![ChatMessage {
+                role: "user".to_string(),
+                content: serde_json::json!([{
+                    "type": "input_audio",
+                    "input_audio": {
+                        "data": data_url
+                    }
+                }]),
+            }],
+            stream: false,
         };
 
         let response = self
@@ -57,36 +69,32 @@ impl AsrClient {
             .map_err(|e| AsrError::NetworkError(format!("{e}")))?;
 
         let status = response.status();
+        debug!("ASR response status: {}", status);
+
         let body = response
             .text()
             .await
             .map_err(|e| AsrError::NetworkError(format!("Failed to read response: {e}")))?;
 
         if !status.is_success() {
-            return Err(AsrError::ApiError(format!(
-                "HTTP {status}: {body}"
-            )));
+            warn!("ASR API error: HTTP {status}, body: {body}");
+            return Err(AsrError::ApiError(format!("HTTP {status}: {body}")));
         }
 
-        let asr_response: AsrResponse = serde_json::from_str(&body)
-            .map_err(|e| AsrError::ParseError(format!("Failed to parse response: {e}, body: {body}")))?;
+        debug!("ASR response body: {}", body);
 
-        // Extract transcribed text from response
-        let text = asr_response
-            .output
-            .and_then(|o| o.sentence)
-            .and_then(|sentences| {
-                Some(
-                    sentences
-                        .iter()
-                        .map(|s| s.text.as_str())
-                        .collect::<Vec<_>>()
-                        .join(""),
-                )
-            })
+        let chat_response: ChatResponse = serde_json::from_str(&body).map_err(|e| {
+            AsrError::ParseError(format!("Failed to parse response: {e}, body: {body}"))
+        })?;
+
+        let text = chat_response
+            .choices
+            .first()
+            .map(|c| c.message.content.trim().to_string())
             .unwrap_or_default();
 
         if text.is_empty() {
+            warn!("ASR returned empty result, response body: {body}");
             return Err(AsrError::EmptyResult);
         }
 
@@ -94,36 +102,36 @@ impl AsrClient {
     }
 }
 
-// --- Request types ---
+// --- Request types (OpenAI-compatible) ---
 
 #[derive(Debug, Serialize)]
-struct AsrRequest {
+struct ChatRequest {
     model: String,
-    input: AsrInput,
+    messages: Vec<ChatMessage>,
+    stream: bool,
 }
 
-#[derive(Debug, Serialize)]
-struct AsrInput {
-    audio: String,
-    format: String,
-    sample_rate: u32,
+#[derive(Debug, Serialize, Deserialize)]
+struct ChatMessage {
+    role: String,
+    content: serde_json::Value,
 }
 
 // --- Response types ---
 
 #[derive(Debug, Deserialize)]
-struct AsrResponse {
-    output: Option<AsrOutput>,
+struct ChatResponse {
+    choices: Vec<ChatChoice>,
 }
 
 #[derive(Debug, Deserialize)]
-struct AsrOutput {
-    sentence: Option<Vec<AsrSentence>>,
+struct ChatChoice {
+    message: ChatResponseMessage,
 }
 
 #[derive(Debug, Deserialize)]
-struct AsrSentence {
-    text: String,
+struct ChatResponseMessage {
+    content: String,
 }
 
 /// Errors that can occur during ASR.
@@ -165,30 +173,23 @@ mod tests {
     #[test]
     fn test_parse_asr_response() {
         let json = r#"{
-            "output": {
-                "sentence": [
-                    {"text": "你好"},
-                    {"text": "世界"}
-                ]
-            }
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "你好世界"
+                    }
+                }
+            ]
         }"#;
-        let response: AsrResponse = serde_json::from_str(json).unwrap();
-        let text: String = response
-            .output
-            .unwrap()
-            .sentence
-            .unwrap()
-            .iter()
-            .map(|s| s.text.as_str())
-            .collect::<Vec<_>>()
-            .join("");
-        assert_eq!(text, "你好世界");
+        let response: ChatResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(response.choices[0].message.content, "你好世界");
     }
 
     #[test]
-    fn test_parse_empty_asr_response() {
-        let json = r#"{"output": null}"#;
-        let response: AsrResponse = serde_json::from_str(json).unwrap();
-        assert!(response.output.is_none());
+    fn test_parse_empty_response() {
+        let json = r#"{"choices": []}"#;
+        let response: ChatResponse = serde_json::from_str(json).unwrap();
+        assert!(response.choices.is_empty());
     }
 }

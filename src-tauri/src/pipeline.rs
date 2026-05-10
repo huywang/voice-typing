@@ -1,3 +1,4 @@
+use log::{debug, error, info};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -26,7 +27,7 @@ impl AudioThread {
     }
 }
 
-/// Central pipeline that coordinates recording → ASR → LLM → injection.
+/// Central pipeline that coordinates recording -> ASR -> LLM -> injection.
 pub struct Pipeline {
     audio_thread: Option<AudioThread>,
     asr_client: Option<AsrClient>,
@@ -41,6 +42,7 @@ unsafe impl Sync for Pipeline {}
 
 impl Pipeline {
     pub fn new() -> Self {
+        debug!("Pipeline created");
         Self {
             audio_thread: None,
             asr_client: None,
@@ -50,6 +52,11 @@ impl Pipeline {
     }
 
     pub fn configure(&mut self, api_key: String, llm_enabled: bool) {
+        info!(
+            "Pipeline configured: api_key={}***, llm_enabled={}",
+            &api_key[..api_key.len().min(4)],
+            llm_enabled
+        );
         self.asr_client = Some(AsrClient::new(api_key.clone()));
         let mut llm = LlmClient::new(api_key);
         llm.set_enabled(llm_enabled);
@@ -61,6 +68,7 @@ impl Pipeline {
     }
 
     pub fn set_status(&self, status: AppStatus) {
+        debug!("Status: {:?}", status);
         *self.status.lock().unwrap() = status;
     }
 
@@ -81,14 +89,18 @@ impl Pipeline {
             return Ok(());
         }
 
+        info!("Initializing audio thread...");
         let buffer = RecordingBuffer::new();
         let buffer_clone = buffer.clone();
 
         let handle = thread::spawn(move || {
             let _recorder = match AudioRecorder::new(buffer_clone) {
-                Ok(r) => r,
+                Ok(r) => {
+                    info!("AudioRecorder initialized on dedicated thread");
+                    r
+                }
                 Err(e) => {
-                    eprintln!("Failed to create audio recorder: {e}");
+                    error!("Failed to create audio recorder: {e}");
                     return;
                 }
             };
@@ -105,6 +117,7 @@ impl Pipeline {
             _handle: handle,
         });
 
+        info!("Audio thread ready");
         Ok(())
     }
 
@@ -112,6 +125,7 @@ impl Pipeline {
         self.ensure_audio_thread()?;
         self.set_status(AppStatus::Recording);
         self.audio_thread.as_ref().unwrap().buffer.start();
+        info!("Recording started");
         Ok(())
     }
 }

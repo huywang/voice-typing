@@ -14,9 +14,9 @@
       {
         "title": "Voice Typing",
         "width": 400,
-        "height": 300,
+        "height": 500,
         "resizable": true,
-        "visible": false
+        "visible": true
       }
     ],
     "security": {

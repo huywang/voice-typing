@@ -1,3 +1,4 @@
+use log::{debug, info, warn};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
@@ -55,12 +56,16 @@ impl LlmClient {
     /// If the API call fails, falls back to the raw text.
     pub async fn polish(&self, raw_text: &str) -> Result<String, LlmError> {
         if raw_text.is_empty() {
+            debug!("LLM polish: empty input, skipping");
             return Ok(String::new());
         }
 
         if !self.enabled {
+            debug!("LLM polish: disabled, returning raw text");
             return Ok(raw_text.to_string());
         }
+
+        info!("LLM polish request: \"{}\"", raw_text);
 
         let request_body = ChatRequest {
             model: "qwen-plus".to_string(),
@@ -89,14 +94,19 @@ impl LlmClient {
             .map_err(|e| LlmError::NetworkError(format!("{e}")))?;
 
         let status = response.status();
+        debug!("LLM response status: {}", status);
+
         let body = response
             .text()
             .await
             .map_err(|e| LlmError::NetworkError(format!("Failed to read response: {e}")))?;
 
         if !status.is_success() {
+            warn!("LLM API error: HTTP {status}, body: {body}");
             return Err(LlmError::ApiError(format!("HTTP {status}: {body}")));
         }
+
+        debug!("LLM response body: {}", body);
 
         let chat_response: ChatResponse = serde_json::from_str(&body)
             .map_err(|e| LlmError::ParseError(format!("Failed to parse response: {e}")))?;

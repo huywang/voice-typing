@@ -1,5 +1,6 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, Stream, StreamConfig};
+use log::{debug, info};
 use std::sync::{Arc, Mutex};
 
 use super::wav::encode_wav;
@@ -17,6 +18,8 @@ pub struct RecordingBuffer {
 struct RecordingInner {
     samples: Vec<f32>,
     is_recording: bool,
+    device_sample_rate: u32,
+    device_channels: u16,
 }
 
 impl RecordingBuffer {
@@ -53,6 +56,68 @@ impl RecordingBuffer {
             inner.samples.extend_from_slice(data);
         }
     }
+
+    /// Store device audio format info so callers can resample correctly.
+    pub fn set_device_info(&self, sample_rate: u32, channels: u16) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.device_sample_rate = sample_rate;
+        inner.device_channels = channels;
+    }
+
+    /// Get device sample rate.
+    pub fn device_sample_rate(&self) -> u32 {
+        self.inner.lock().unwrap().device_sample_rate
+    }
+
+    /// Get device channel count.
+    pub fn device_channels(&self) -> u16 {
+        self.inner.lock().unwrap().device_channels
+    }
+
+    /// Get recorded audio as properly resampled 16kHz mono WAV bytes.
+    pub fn get_wav_data(&self) -> Result<Vec<u8>, String> {
+        let (samples, device_sample_rate, device_channels) = {
+            let inner = self.inner.lock().unwrap();
+            (inner.samples.clone(), inner.device_sample_rate, inner.device_channels)
+        };
+
+        if samples.is_empty() {
+            return Err("No audio data recorded".to_string());
+        }
+
+        debug!(
+            "Raw audio: {} samples, device={}Hz/{}ch",
+            samples.len(),
+            device_sample_rate,
+            device_channels
+        );
+
+        // Mix to mono if multi-channel
+        let mono_samples = if device_channels > 1 {
+            debug!("Mixing {} channels to mono", device_channels);
+            mix_to_mono(&samples, device_channels)
+        } else {
+            samples
+        };
+
+        // Resample to 16kHz if needed
+        let resampled = if device_sample_rate != TARGET_SAMPLE_RATE {
+            debug!(
+                "Resampling: {}Hz -> {}Hz ({} -> {} samples)",
+                device_sample_rate,
+                TARGET_SAMPLE_RATE,
+                mono_samples.len(),
+                (mono_samples.len() as f64 * TARGET_SAMPLE_RATE as f64
+                    / device_sample_rate as f64)
+                    .ceil() as usize
+            );
+            resample(&mono_samples, device_sample_rate, TARGET_SAMPLE_RATE)
+        } else {
+            mono_samples
+        };
+
+        encode_wav(&resampled, TARGET_SAMPLE_RATE)
+    }
 }
 
 /// Cross-platform audio recorder that captures microphone input.
@@ -79,10 +144,16 @@ impl AudioRecorder {
             AudioError::ConfigError(format!("Failed to get default input config: {e}"))
         })?;
 
+        let device_name = device.name().unwrap_or_else(|_| "unknown".to_string());
         let device_sample_rate = config.sample_rate().0;
         let device_channels = config.channels();
-
         let sample_format = config.sample_format();
+
+        info!(
+            "Audio device: \"{}\", format: {:?}, sample_rate: {}Hz, channels: {}",
+            device_name, sample_format, device_sample_rate, device_channels
+        );
+
         let stream_config: StreamConfig = config.into();
 
         let buf = buffer.clone();
@@ -120,6 +191,8 @@ impl AudioRecorder {
         stream
             .play()
             .map_err(|e| AudioError::StreamError(format!("Failed to start stream: {e}")))?;
+
+        buffer.set_device_info(device_sample_rate, device_channels);
 
         Ok(Self {
             buffer,
