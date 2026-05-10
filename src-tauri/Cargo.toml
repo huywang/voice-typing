@@ -29,4 +29,5 @@ enigo = "0.3"
 reqwest = { version = "0.12", features = ["json"] }
 tokio = { version = "1", features = ["full"] }
 base64 = "0.22"
+tauri-plugin-global-shortcut = "2"
 
