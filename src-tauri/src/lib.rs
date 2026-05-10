@@ -1,6 +1,7 @@
 mod asr;
 mod audio;
 mod commands;
+mod context;
 mod history;
 mod injector;
 mod llm;
@@ -61,6 +62,9 @@ pub fn run() {
             commands::set_hotkey,
             commands::set_translation_target,
             commands::get_translation_target,
+            commands::test_api_key,
+            commands::delete_history_item,
+            commands::reinject_history_item,
         ])
         .setup(|app| {
             // Initialize history database
@@ -373,7 +377,7 @@ pub fn run() {
                                         raw_text: raw_text_for_history,
                                         polished_text: final_text.clone(),
                                         duration_secs,
-                                        app_name: String::new(),
+                                        app_name: context::get_frontmost_app_name(),
                                     };
                                     if let Err(e) = history_state.0.insert(&record) {
                                         error!("Failed to save history record: {e}");
@@ -662,7 +666,7 @@ pub fn run() {
                                         raw_text,
                                         polished_text: translated_text.clone(),
                                         duration_secs,
-                                        app_name: String::new(),
+                                        app_name: context::get_frontmost_app_name(),
                                     };
                                     if let Err(e) = history_state.0.insert(&record) {
                                         error!("Failed to save translation history record: {e}");

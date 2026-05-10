@@ -8,6 +8,8 @@ use tauri::{AppHandle, State};
 use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
 use tauri_plugin_store::StoreExt;
 
+use crate::asr::{AsrClient, AsrError};
+use crate::audio::encode_wav;
 use crate::history::{HistoryDb, HistoryRecord};
 use crate::pipeline::{AppStatus, Pipeline};
 
@@ -201,7 +203,7 @@ pub async fn stop_and_process(
         raw_text: raw_text_for_history,
         polished_text: final_text.clone(),
         duration_secs,
-        app_name: String::new(),
+        app_name: crate::context::get_frontmost_app_name(),
     };
     if let Err(e) = history.0.insert(&record) {
         error!("Failed to save history record: {e}");
@@ -232,6 +234,40 @@ pub fn clear_history(state: State<HistoryState>) -> Result<(), String> {
 #[tauri::command]
 pub fn get_history_count(state: State<HistoryState>) -> Result<u32, String> {
     state.0.count()
+}
+/// Delete a single history record by id.
+#[tauri::command]
+pub fn delete_history_item(state: State<HistoryState>, id: i64) -> Result<(), String> {
+    info!("delete_history_item: id={id}");
+    state.0.delete(id)
+}
+
+/// Re-inject the polished text of a history record into the currently focused input field.
+#[tauri::command]
+pub fn reinject_history_item(state: State<HistoryState>, id: i64) -> Result<(), String> {
+    info!("reinject_history_item: id={id}");
+
+    // Look up the record first.
+    let record = state
+        .0
+        .get(id)?
+        .ok_or_else(|| format!("History record {id} not found"))?;
+
+    // Inject the polished text.
+    let mut injector = crate::injector::TextInjector::new().map_err(|e| {
+        error!("Failed to init text injector for re-inject: {e}");
+        format!("Failed to init text injector: {e}")
+    })?;
+    injector.inject(&record.polished_text).map_err(|e| {
+        error!("Failed to re-inject history record {id}: {e}");
+        format!("Failed to inject text: {e}")
+    })?;
+
+    info!(
+        "Re-injected history record {id} ({} chars)",
+        record.polished_text.len()
+    );
+    Ok(())
 }
 
 /// Get whether launch-at-startup is currently enabled.
@@ -575,6 +611,61 @@ pub fn get_hotkey(app: AppHandle) -> String {
         .unwrap_or_else(|| DEFAULT_HOTKEY.to_string());
     debug!("get_hotkey: {hotkey}");
     hotkey
+}
+
+/// Test whether the given DashScope API key can reach the ASR service.
+///
+/// Generates a short silent WAV (500 ms at 16 kHz) and sends it to the ASR
+/// endpoint.  Because the audio is silence, the API may return an empty result
+/// — that is still treated as a successful connection.  Only network errors or
+/// HTTP 401/403 authentication failures are reported as errors.
+#[tauri::command]
+pub async fn test_api_key(api_key: String) -> Result<String, String> {
+    info!("test_api_key: validating API key connectivity");
+
+    if api_key.trim().is_empty() {
+        return Err("API key cannot be empty".to_string());
+    }
+
+    // Generate 500 ms of silence at 16 kHz — small enough to be fast,
+    // large enough for the API to accept as valid audio.
+    let silence_samples = vec![0.0f32; 8000]; // 0.5 s × 16 000 Hz
+    let wav_data = encode_wav(&silence_samples, 16000)
+        .map_err(|e| format!("Failed to encode test WAV: {e}"))?;
+
+    debug!("test_api_key: sending {} bytes WAV to ASR", wav_data.len());
+
+    let client = AsrClient::new(api_key.trim().to_string());
+
+    match client.recognize(&wav_data).await {
+        Ok(text) => {
+            info!("test_api_key: ASR returned text: {:?}", text);
+            Ok("ok".to_string())
+        }
+        Err(AsrError::EmptyResult) => {
+            // Silence produces no transcript — the API accepted the request,
+            // so the key is valid.
+            info!("test_api_key: ASR returned empty result (silence) — key is valid");
+            Ok("ok".to_string())
+        }
+        Err(AsrError::ApiError(msg)) => {
+            warn!("test_api_key: API error: {}", msg);
+            // Surface HTTP 401/403 as authentication failures.
+            if msg.contains("401") || msg.contains("403") {
+                Err(format!("Authentication failed — check your API key ({})", msg))
+            } else {
+                Err(format!("API error: {}", msg))
+            }
+        }
+        Err(AsrError::NetworkError(msg)) => {
+            warn!("test_api_key: network error: {}", msg);
+            Err(format!("Network error — check your internet connection ({})", msg))
+        }
+        Err(e) => {
+            warn!("test_api_key: unexpected error: {}", e);
+            Err(format!("Connection test failed: {e}"))
+        }
+    }
 }
 
 /// Persist the push-to-talk hotkey string to the store.

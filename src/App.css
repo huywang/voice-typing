@@ -452,6 +452,41 @@ button.danger:hover {
   line-height: 1.5;
 }
 
+/* Per-item action buttons rendered inside expanded history cards */
+.history-item-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.item-action {
+  padding: 4px 12px;
+  font-size: 0.8em;
+  border-radius: 6px;
+  border: 1px solid var(--border-muted);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.item-action:hover {
+  background: var(--bg-secondary);
+  border-color: var(--accent);
+}
+
+.item-action.danger {
+  color: var(--danger, #e53e3e);
+  border-color: var(--danger, #e53e3e);
+}
+
+.item-action.danger:hover,
+.item-action.danger.active {
+  background: var(--danger, #e53e3e);
+  color: #fff;
+}
+
 /* ============================================================
    Onboarding wizard
    ============================================================ */
@@ -836,4 +871,24 @@ button.danger:hover {
   color: var(--status-recording);
   border-color: transparent;
   background: none;
+}
+
+/* ============================================================
+   Inline field save-status indicator (auto-save feedback)
+   ============================================================ */
+.field-status {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 0.85em;
+  font-weight: 600;
+  vertical-align: middle;
+  transition: opacity 0.3s;
+}
+
+.field-status--saved {
+  color: var(--status-idle);
+}
+
+.field-status--error {
+  color: var(--status-recording);
 }

@@ -50,7 +50,7 @@ function App() {
   }
 
   if (view === "settings") {
-    return <Settings onBack={() => setView("main")} onSave={() => setView("main")} />;
+    return <Settings onBack={() => setView("main")} />;
   }
 
   if (view === "history") {

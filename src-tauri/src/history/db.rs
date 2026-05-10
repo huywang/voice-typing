@@ -105,6 +105,54 @@ impl HistoryDb {
         Ok(records)
     }
 
+    /// Get a single history record by id. Returns None if not found.
+    pub fn get(&self, id: i64) -> Result<Option<HistoryRecord>, String> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, timestamp, raw_text, polished_text, duration_secs, app_name
+                 FROM history WHERE id = ?1",
+            )
+            .map_err(|e| format!("Failed to prepare get query: {e}"))?;
+
+        let mut rows = stmt
+            .query_map(params![id], |row| {
+                Ok(HistoryRecord {
+                    id: row.get(0)?,
+                    timestamp: row.get(1)?,
+                    raw_text: row.get(2)?,
+                    polished_text: row.get(3)?,
+                    duration_secs: row.get(4)?,
+                    app_name: row.get(5)?,
+                })
+            })
+            .map_err(|e| format!("Failed to query history record: {e}"))?;
+
+        match rows.next() {
+            Some(row) => Ok(Some(
+                row.map_err(|e| format!("Failed to read history row: {e}"))?,
+            )),
+            None => Ok(None),
+        }
+    }
+
+    /// Delete a single history record by id.
+    pub fn delete(&self, id: i64) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        let affected = conn
+            .execute("DELETE FROM history WHERE id = ?1", params![id])
+            .map_err(|e| {
+                error!("Failed to delete history record {id}: {e}");
+                format!("Failed to delete history record: {e}")
+            })?;
+        if affected == 0 {
+            info!("delete_history: no record found with id={id}");
+        } else {
+            info!("History record {id} deleted");
+        }
+        Ok(())
+    }
+
     /// Delete all history records.
     pub fn clear(&self) -> Result<(), String> {
         let conn = self.conn.lock().unwrap();

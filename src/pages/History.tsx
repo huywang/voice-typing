@@ -22,6 +22,8 @@ function History({ onBack }: HistoryProps) {
   const [loading, setLoading] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const loadRecords = useCallback(async (offset: number, append: boolean) => {
     setLoading(true);
@@ -63,6 +65,48 @@ function History({ onBack }: HistoryProps) {
     }
   };
 
+  /** Copy the polished text of a record to the clipboard. */
+  const handleCopy = async (e: React.MouseEvent, record: HistoryRecord) => {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(record.polished_text);
+    } catch (err) {
+      console.error("Failed to copy text:", err);
+      setActionError("Failed to copy text to clipboard.");
+    }
+  };
+
+  /** Re-inject the polished text of a record into the focused input field. */
+  const handleReinject = async (e: React.MouseEvent, record: HistoryRecord) => {
+    e.stopPropagation();
+    try {
+      await invoke("reinject_history_item", { id: record.id });
+    } catch (err) {
+      console.error("Failed to re-inject:", err);
+      setActionError(`Failed to re-inject: ${err}`);
+    }
+  };
+
+  /** Request delete confirmation; on second click, execute delete and refresh. */
+  const handleDelete = async (e: React.MouseEvent, record: HistoryRecord) => {
+    e.stopPropagation();
+    if (confirmDeleteId !== record.id) {
+      setConfirmDeleteId(record.id);
+      return;
+    }
+    try {
+      await invoke("delete_history_item", { id: record.id });
+      setConfirmDeleteId(null);
+      // Remove the item from local state and refresh the count.
+      setRecords((prev) => prev.filter((r) => r.id !== record.id));
+      setTotalCount((prev) => Math.max(0, prev - 1));
+      if (expandedId === record.id) setExpandedId(null);
+    } catch (err) {
+      console.error("Failed to delete history item:", err);
+      setActionError(`Failed to delete: ${err}`);
+    }
+  };
+
   const formatTimestamp = (ts: string) => {
     const date = new Date(ts);
     return date.toLocaleString();
@@ -94,6 +138,12 @@ function History({ onBack }: HistoryProps) {
         )}
       </div>
 
+      {actionError && (
+        <p className="error-hint" onClick={() => setActionError(null)}>
+          {actionError}
+        </p>
+      )}
+
       {records.length === 0 && !loading && (
         <p className="empty-hint">No transcription history yet.</p>
       )}
@@ -103,9 +153,11 @@ function History({ onBack }: HistoryProps) {
           <div
             key={record.id}
             className={`history-item ${expandedId === record.id ? "expanded" : ""}`}
-            onClick={() =>
-              setExpandedId(expandedId === record.id ? null : record.id)
-            }
+            onClick={() => {
+              setExpandedId(expandedId === record.id ? null : record.id);
+              // Reset per-item confirm state when collapsing.
+              if (confirmDeleteId === record.id) setConfirmDeleteId(null);
+            }}
           >
             <div className="history-item-header">
               <span className="history-timestamp">
@@ -132,6 +184,38 @@ function History({ onBack }: HistoryProps) {
                     <p className="detail-text">{record.raw_text}</p>
                   </div>
                 )}
+                {/* Per-item action buttons */}
+                <div className="history-item-actions" onClick={(e) => e.stopPropagation()}>
+                  <button
+                    className="item-action"
+                    onClick={(e) => handleCopy(e, record)}
+                  >
+                    Copy
+                  </button>
+                  <button
+                    className="item-action"
+                    onClick={(e) => handleReinject(e, record)}
+                  >
+                    Re-inject
+                  </button>
+                  <button
+                    className={`item-action danger ${confirmDeleteId === record.id ? "active" : ""}`}
+                    onClick={(e) => handleDelete(e, record)}
+                  >
+                    {confirmDeleteId === record.id ? "Confirm Delete?" : "Delete"}
+                  </button>
+                  {confirmDeleteId === record.id && (
+                    <button
+                      className="item-action"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setConfirmDeleteId(null);
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  )}
+                </div>
               </div>
             )}
           </div>

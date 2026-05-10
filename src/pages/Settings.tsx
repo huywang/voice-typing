@@ -1,9 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
 interface SettingsProps {
   onBack: () => void;
-  onSave: () => void;
 }
 
 interface AudioDeviceInfo {
@@ -14,6 +13,9 @@ interface AudioDeviceInfo {
 // Available tab identifiers
 type Tab = "general" | "ai" | "shortcuts" | "about";
 
+// Per-field save status for inline feedback
+type FieldStatus = "saved" | "error" | null;
+
 // Fixed shortcut definitions displayed on the Shortcuts tab
 const SHORTCUTS: { label: string; keys: string[] }[] = [
   { label: "Push-to-Talk", keys: ["Cmd", "Shift", "Space"] },
@@ -22,7 +24,10 @@ const SHORTCUTS: { label: string; keys: string[] }[] = [
   { label: "Translation", keys: ["Cmd", "Shift", "T"] },
 ];
 
-function Settings({ onBack, onSave }: SettingsProps) {
+// Duration (ms) before inline save status fades away
+const STATUS_CLEAR_DELAY = 2000;
+
+function Settings({ onBack }: SettingsProps) {
   const [activeTab, setActiveTab] = useState<Tab>("general");
 
   // General tab state
@@ -31,8 +36,6 @@ function Settings({ onBack, onSave }: SettingsProps) {
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [dockVisible, setDockVisible] = useState(true);
   const [isMacos, setIsMacos] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
 
   // Microphone device selection state
   const [audioDevices, setAudioDevices] = useState<AudioDeviceInfo[]>([]);
@@ -45,6 +48,10 @@ function Settings({ onBack, onSave }: SettingsProps) {
   const [hotkeyError, setHotkeyError] = useState("");
   const [hotkeySaved, setHotkeySaved] = useState(false);
 
+  // API key connection test state
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+
   // AI tab state
   const [llmEnabled, setLlmEnabled] = useState(true);
 
@@ -54,6 +61,36 @@ function Settings({ onBack, onSave }: SettingsProps) {
   // Personal dictionary state
   const [dictionary, setDictionary] = useState<string[]>([]);
   const [newTerm, setNewTerm] = useState("");
+
+  // Per-field inline save status map
+  const [fieldStatus, setFieldStatus] = useState<Record<string, FieldStatus>>({});
+
+  // Timers for auto-clearing field status after STATUS_CLEAR_DELAY
+  const statusTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+
+  // Set a field's status and schedule auto-clear
+  const setStatus = useCallback((field: string, status: FieldStatus) => {
+    setFieldStatus((prev) => ({ ...prev, [field]: status }));
+
+    // Clear any existing timer for this field
+    if (statusTimers.current[field]) {
+      clearTimeout(statusTimers.current[field]);
+    }
+
+    if (status !== null) {
+      statusTimers.current[field] = setTimeout(() => {
+        setFieldStatus((prev) => ({ ...prev, [field]: null }));
+      }, STATUS_CLEAR_DELAY);
+    }
+  }, []);
+
+  // Cleanup all timers on unmount
+  useEffect(() => {
+    const timers = statusTimers.current;
+    return () => {
+      Object.values(timers).forEach(clearTimeout);
+    };
+  }, []);
 
   // Load persisted toggles when the settings page mounts.
   useEffect(() => {
@@ -113,38 +150,118 @@ function Settings({ onBack, onSave }: SettingsProps) {
       .catch(() => {
         // Non-fatal: keep the default "English".
       });
+
+    // API key is write-only for security; field intentionally starts empty on
+    // each settings open. The user only needs to re-enter it to change it.
   }, []);
 
-  const handleSave = async () => {
-    if (!apiKey.trim()) {
-      setError("Please enter your DashScope API key");
-      return;
-    }
+  // --- Instant-save handlers for toggle/checkbox fields ---
 
-    setSaving(true);
-    setError("");
-
+  const handleAutostartChange = async (checked: boolean) => {
+    setAutostartEnabled(checked);
     try {
-      await invoke("set_api_config", {
-        apiKey: apiKey.trim(),
-        llmEnabled,
-      });
-      await invoke("set_autostart_enabled", { enabled: autostartEnabled });
-      await invoke("set_sound_enabled", { enabled: soundEnabled });
-      await invoke("set_audio_device", { deviceName: selectedDevice });
-      await invoke("set_translation_target", { language: translationTarget });
-      if (isMacos) {
-        await invoke("set_dock_visible", { visible: dockVisible });
-      }
-      onSave();
-    } catch (e) {
-      setError(`Failed to save: ${e}`);
-    } finally {
-      setSaving(false);
+      await invoke("set_autostart_enabled", { enabled: checked });
+      setStatus("autostart", "saved");
+    } catch {
+      setAutostartEnabled(!checked); // revert on failure
+      setStatus("autostart", "error");
     }
   };
 
-  // Save the push-to-talk hotkey.
+  const handleSoundChange = async (checked: boolean) => {
+    setSoundEnabled(checked);
+    try {
+      await invoke("set_sound_enabled", { enabled: checked });
+      setStatus("sound", "saved");
+    } catch {
+      setSoundEnabled(!checked); // revert on failure
+      setStatus("sound", "error");
+    }
+  };
+
+  const handleDockChange = async (checked: boolean) => {
+    setDockVisible(checked);
+    try {
+      await invoke("set_dock_visible", { visible: checked });
+      setStatus("dock", "saved");
+    } catch {
+      setDockVisible(!checked); // revert on failure
+      setStatus("dock", "error");
+    }
+  };
+
+  const handleLlmChange = async (checked: boolean) => {
+    setLlmEnabled(checked);
+    try {
+      // set_api_config requires both apiKey and llmEnabled; pass current apiKey
+      await invoke("set_api_config", { apiKey: apiKey.trim(), llmEnabled: checked });
+      setStatus("llm", "saved");
+    } catch {
+      setLlmEnabled(!checked); // revert on failure
+      setStatus("llm", "error");
+    }
+  };
+
+  const handleDeviceChange = async (deviceName: string | null) => {
+    setSelectedDevice(deviceName);
+    try {
+      await invoke("set_audio_device", { deviceName });
+      setStatus("device", "saved");
+    } catch {
+      setStatus("device", "error");
+    }
+  };
+
+  // --- Blur-save handlers for text fields ---
+
+  const handleApiKeyBlur = async () => {
+    const trimmed = apiKey.trim();
+    if (!trimmed) {
+      setStatus("apiKey", "error");
+      return;
+    }
+    try {
+      await invoke("set_api_config", { apiKey: trimmed, llmEnabled });
+      setStatus("apiKey", "saved");
+    } catch {
+      setStatus("apiKey", "error");
+    }
+  };
+
+  // Send a silent test WAV to verify the API key is valid.
+  const handleTestApiKey = async () => {
+    const trimmed = apiKey.trim();
+    if (!trimmed) {
+      setTestResult({ ok: false, message: "Please enter an API key first." });
+      return;
+    }
+    setTesting(true);
+    setTestResult(null);
+    try {
+      await invoke<string>("test_api_key", { apiKey: trimmed });
+      setTestResult({ ok: true, message: "Connected!" });
+    } catch (e) {
+      setTestResult({ ok: false, message: String(e) });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const handleTranslationTargetBlur = async () => {
+    const trimmed = translationTarget.trim();
+    if (!trimmed) {
+      setStatus("translationTarget", "error");
+      return;
+    }
+    try {
+      await invoke("set_translation_target", { language: trimmed });
+      setStatus("translationTarget", "saved");
+    } catch {
+      setStatus("translationTarget", "error");
+    }
+  };
+
+  // --- Hotkey save (requires explicit Apply button + restart) ---
   const handleSaveHotkey = async () => {
     const trimmed = hotkey.trim();
     if (!trimmed) {
@@ -201,8 +318,19 @@ function Settings({ onBack, onSave }: SettingsProps) {
     }
   };
 
-  // Save button only shown on tabs with editable settings
-  const showSave = activeTab === "general" || activeTab === "ai";
+  // Render a small inline status indicator (checkmark or X) for a given field
+  const renderFieldStatus = (field: string) => {
+    const status = fieldStatus[field];
+    if (!status) return null;
+    return (
+      <span
+        className={`field-status field-status--${status}`}
+        aria-live="polite"
+      >
+        {status === "saved" ? "✓" : "✗"}
+      </span>
+    );
+  };
 
   return (
     <main className="container settings">
@@ -217,10 +345,7 @@ function Settings({ onBack, onSave }: SettingsProps) {
               role="tab"
               aria-selected={activeTab === tab}
               className={`tab-btn${activeTab === tab ? " active" : ""}`}
-              onClick={() => {
-                setActiveTab(tab);
-                setError("");
-              }}
+              onClick={() => setActiveTab(tab)}
             >
               {tab.charAt(0).toUpperCase() + tab.slice(1)}
             </button>
@@ -231,29 +356,59 @@ function Settings({ onBack, onSave }: SettingsProps) {
         {activeTab === "general" && (
           <div className="tab-panel" role="tabpanel">
             <div className="form-group">
-              <label htmlFor="api-key">DashScope API Key</label>
-              <input
-                id="api-key"
-                type="password"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder="sk-..."
-              />
+              <label htmlFor="api-key">
+                DashScope API Key
+                {renderFieldStatus("apiKey")}
+              </label>
+              <div className="dictionary-input-row">
+                <input
+                  id="api-key"
+                  type="password"
+                  value={apiKey}
+                  onChange={(e) => {
+                    setApiKey(e.target.value);
+                    // Clear previous test result when the key changes.
+                    setTestResult(null);
+                  }}
+                  onBlur={handleApiKeyBlur}
+                  placeholder="sk-..."
+                />
+                <button
+                  type="button"
+                  onClick={handleTestApiKey}
+                  disabled={testing}
+                >
+                  {testing ? "Testing..." : "Test"}
+                </button>
+              </div>
+              {testResult && (
+                <p
+                  className="form-hint"
+                  style={{ color: testResult.ok ? "var(--status-idle)" : "var(--status-error, #e55)" }}
+                  aria-live="polite"
+                >
+                  {testResult.message}
+                </p>
+              )}
               <p className="form-hint">
                 Get your API key from{" "}
                 <a href="https://dashscope.console.aliyun.com/" target="_blank">
                   Alibaba Cloud DashScope
                 </a>
+                . Saved automatically when you leave this field.
               </p>
             </div>
 
             <div className="form-group">
-              <label htmlFor="microphone">Microphone</label>
+              <label htmlFor="microphone">
+                Microphone
+                {renderFieldStatus("device")}
+              </label>
               <select
                 id="microphone"
                 value={selectedDevice ?? ""}
                 onChange={(e) =>
-                  setSelectedDevice(
+                  handleDeviceChange(
                     e.target.value === "" ? null : e.target.value,
                   )
                 }
@@ -277,9 +432,10 @@ function Settings({ onBack, onSave }: SettingsProps) {
                 <input
                   type="checkbox"
                   checked={autostartEnabled}
-                  onChange={(e) => setAutostartEnabled(e.target.checked)}
+                  onChange={(e) => handleAutostartChange(e.target.checked)}
                 />
                 Launch at startup
+                {renderFieldStatus("autostart")}
               </label>
               <p className="form-hint">
                 Automatically start Voice Typing when you log in.
@@ -291,9 +447,10 @@ function Settings({ onBack, onSave }: SettingsProps) {
                 <input
                   type="checkbox"
                   checked={soundEnabled}
-                  onChange={(e) => setSoundEnabled(e.target.checked)}
+                  onChange={(e) => handleSoundChange(e.target.checked)}
                 />
                 Enable sound effects
+                {renderFieldStatus("sound")}
               </label>
               <p className="form-hint">
                 Play a sound when recording starts, stops, or an error occurs.
@@ -306,9 +463,10 @@ function Settings({ onBack, onSave }: SettingsProps) {
                   <input
                     type="checkbox"
                     checked={dockVisible}
-                    onChange={(e) => setDockVisible(e.target.checked)}
+                    onChange={(e) => handleDockChange(e.target.checked)}
                   />
                   Show in Dock
+                  {renderFieldStatus("dock")}
                 </label>
                 <p className="form-hint">
                   Show the app icon in the macOS Dock. When hidden, the app is
@@ -327,9 +485,10 @@ function Settings({ onBack, onSave }: SettingsProps) {
                 <input
                   type="checkbox"
                   checked={llmEnabled}
-                  onChange={(e) => setLlmEnabled(e.target.checked)}
+                  onChange={(e) => handleLlmChange(e.target.checked)}
                 />
                 Enable LLM text polishing (Qwen)
+                {renderFieldStatus("llm")}
               </label>
               <p className="form-hint">
                 When enabled, recognized text will be polished by Qwen LLM to
@@ -338,18 +497,23 @@ function Settings({ onBack, onSave }: SettingsProps) {
             </div>
 
             <div className="form-group">
-              <label htmlFor="translation-target">Translation target language</label>
+              <label htmlFor="translation-target">
+                Translation target language
+                {renderFieldStatus("translationTarget")}
+              </label>
               <input
                 id="translation-target"
                 type="text"
                 value={translationTarget}
                 onChange={(e) => setTranslationTarget(e.target.value)}
+                onBlur={handleTranslationTargetBlur}
                 placeholder="e.g. English"
               />
               <p className="form-hint">
                 Language to translate into when using the translation hotkey
                 (Cmd+Shift+T). Common options: English, 中文, 日本語, 한국어,
-                Français, Español, Deutsch.
+                Français, Español, Deutsch. Saved automatically when you leave
+                this field.
               </p>
             </div>
 
@@ -416,7 +580,7 @@ function Settings({ onBack, onSave }: SettingsProps) {
               ))}
             </div>
 
-            {/* Editable push-to-talk hotkey */}
+            {/* Editable push-to-talk hotkey — requires explicit Apply + restart */}
             <div className="form-group" style={{ marginTop: "20px" }}>
               <label htmlFor="hotkey">Push-to-Talk Hotkey (custom)</label>
               <div className="dictionary-input-row">
@@ -492,18 +656,9 @@ function Settings({ onBack, onSave }: SettingsProps) {
         )}
       </div>
 
-      {error && <p className="error">{error}</p>}
-
-      {/* Action row — Save only shown on tabs with editable settings */}
+      {/* Action row — only Back button remains; Save is now automatic */}
       <div className="actions">
-        <button onClick={onBack} disabled={saving}>
-          Back
-        </button>
-        {showSave && (
-          <button className="primary" onClick={handleSave} disabled={saving}>
-            {saving ? "Saving..." : "Save"}
-          </button>
-        )}
+        <button onClick={onBack}>Back</button>
       </div>
     </main>
   );
