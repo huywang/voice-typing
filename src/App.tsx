@@ -1,49 +1,75 @@
-import { useState } from "react";
-import reactLogo from "./assets/react.svg";
+import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import Settings from "./pages/Settings";
+import RecordingOverlay from "./components/RecordingOverlay";
 import "./App.css";
 
-function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
+type AppView = "main" | "settings";
 
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
+function App() {
+  const [view, setView] = useState<AppView>("main");
+  const [status, setStatus] = useState("idle");
+  const [lastText, _setLastText] = useState("");
+  const [configured, setConfigured] = useState(false);
+
+  useEffect(() => {
+    // Poll status every 500ms
+    const interval = setInterval(async () => {
+      try {
+        const s = await invoke<string>("get_status");
+        setStatus(s);
+      } catch (e) {
+        console.error("Failed to get status:", e);
+      }
+    }, 500);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Show settings on first run if not configured
+  useEffect(() => {
+    if (!configured) {
+      setView("settings");
+    }
+  }, [configured]);
+
+  const handleConfigured = () => {
+    setConfigured(true);
+    setView("main");
+  };
+
+  if (view === "settings") {
+    return <Settings onBack={() => setView("main")} onSave={handleConfigured} />;
   }
 
   return (
     <main className="container">
-      <h1>Welcome to Tauri + React</h1>
+      <RecordingOverlay />
+      <h1>Voice Typing</h1>
 
-      <div className="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
+      <div className="status-indicator">
+        <div className={`status-dot ${status}`} />
+        <span className="status-text">
+          {status === "idle" && "Ready - Press hotkey to speak"}
+          {status === "recording" && "Recording..."}
+          {status === "processing" && "Processing..."}
+          {status.startsWith("error") && `Error: ${status.slice(6)}`}
+        </span>
       </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
 
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
-        />
-        <button type="submit">Greet</button>
-      </form>
-      <p>{greetMsg}</p>
+      {lastText && (
+        <div className="last-text">
+          <p className="label">Last transcription:</p>
+          <p className="text">{lastText}</p>
+        </div>
+      )}
+
+      <div className="actions">
+        <button onClick={() => setView("settings")}>Settings</button>
+      </div>
+
+      <p className="hint">
+        Use <kbd>Ctrl+Shift+Space</kbd> (or <kbd>Cmd+Shift+Space</kbd> on Mac) to start voice input
+      </p>
     </main>
   );
 }
