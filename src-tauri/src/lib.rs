@@ -71,75 +71,81 @@ fn set_ns_window_level_status(win: &tauri::WebviewWindow) {
 /// On multi-monitor setups this ensures the bar appears on the active screen
 /// rather than always on the primary display.
 fn show_floating_bar(app: &AppHandle) {
-    if let Some(win) = app.get_webview_window("floating-bar") {
-        // Attempt to position the bar on the monitor that contains the cursor.
-        // If any step fails we fall back to just showing the window at its
-        // existing position — positioning is best-effort.
-        match (win.available_monitors(), win.cursor_position()) {
-            (Ok(monitors), Ok(cursor)) => {
-                // Find which monitor the cursor is on.
-                let target = monitors.iter().find(|m| {
-                    let pos = m.position();
-                    let size = m.size();
-                    cursor.x >= pos.x as f64
-                        && cursor.x < (pos.x + size.width as i32) as f64
-                        && cursor.y >= pos.y as f64
-                        && cursor.y < (pos.y + size.height as i32) as f64
-                });
-
-                if let Some(monitor) = target {
-                    let pos = monitor.position();
-                    let size = monitor.size();
-                    // Bar dimensions must match tauri.conf.json (460 × 60).
-                    let bar_width = 460.0_f64;
-                    let bar_height = 60.0_f64;
-                    // Center horizontally; place 40 px above the bottom edge.
-                    let x = pos.x as f64 + (size.width as f64 - bar_width) / 2.0;
-                    let y = pos.y as f64 + size.height as f64 - bar_height - 40.0;
-                    if let Err(e) = win.set_position(tauri::Position::Physical(
-                        tauri::PhysicalPosition::new(x as i32, y as i32),
-                    )) {
-                        warn!("Failed to reposition floating-bar: {e}");
-                    } else {
-                        debug!(
-                            "Floating-bar positioned at ({}, {}) on monitor \"{}\"",
-                            x as i32,
-                            y as i32,
-                            monitor.name().map_or("unknown", |v| v)
-                        );
-                    }
-                } else {
-                    debug!("Cursor not found on any monitor; keeping existing floating-bar position");
+    // Try to get existing window, or create it dynamically if it doesn't exist.
+    let win = match app.get_webview_window("floating-bar") {
+        Some(w) => w,
+        None => {
+            info!("floating-bar window not found, creating dynamically");
+            let dev_url = app.config().build.dev_url.as_ref();
+            let url = if dev_url.is_some() {
+                // Dev mode: use localhost URL with query param
+                tauri::WebviewUrl::External(
+                    "http://localhost:1420?view=floating".parse().unwrap(),
+                )
+            } else {
+                // Production: use relative path
+                tauri::WebviewUrl::App("index.html?view=floating".into())
+            };
+            match tauri::WebviewWindowBuilder::new(app, "floating-bar", url)
+                .title("")
+                .inner_size(280.0, 40.0)
+                .decorations(false)
+                .always_on_top(true)
+                .skip_taskbar(true)
+                .resizable(false)
+                .visible(false)
+                .build()
+            {
+                Ok(w) => w,
+                Err(e) => {
+                    error!("Failed to create floating-bar window: {e}");
+                    return;
                 }
             }
-            (Err(e), _) => warn!("Failed to enumerate monitors: {e}"),
-            (_, Err(e)) => warn!("Failed to get cursor position: {e}"),
         }
+    };
 
-        // Force always-on-top on every show to ensure the bar stays above
-        // fullscreen apps and other windows that may have taken focus.
-        let _ = win.set_always_on_top(true);
+    // Position the bar on the monitor that contains the cursor.
+    match (win.available_monitors(), win.cursor_position()) {
+        (Ok(monitors), Ok(cursor)) => {
+            let target = monitors.iter().find(|m| {
+                let pos = m.position();
+                let size = m.size();
+                cursor.x >= pos.x as f64
+                    && cursor.x < (pos.x + size.width as i32) as f64
+                    && cursor.y >= pos.y as f64
+                    && cursor.y < (pos.y + size.height as i32) as f64
+            });
 
-        // On macOS, Tauri's set_always_on_top uses NSFloatingWindowLevel (3),
-        // which can fall behind fullscreen windows or other always-on-top
-        // windows. Elevate to NSStatusWindowLevel (25) via the raw NSWindow
-        // handle so the bar is reliably visible on all workspaces.
-        #[cfg(target_os = "macos")]
-        set_ns_window_level_status(&win);
-
-        // Show on all macOS spaces / Mission Control desktops so the bar
-        // follows the user when they switch workspaces.
-        if let Err(e) = win.set_visible_on_all_workspaces(true) {
-            warn!("Failed to set floating-bar visible on all workspaces: {e}");
+            if let Some(monitor) = target {
+                let pos = monitor.position();
+                let size = monitor.size();
+                let bar_width = 280.0_f64;
+                let bar_height = 40.0_f64;
+                let x = pos.x as f64 + (size.width as f64 - bar_width) / 2.0;
+                let y = pos.y as f64 + size.height as f64 - bar_height - 40.0;
+                let _ = win.set_position(tauri::Position::Physical(
+                    tauri::PhysicalPosition::new(x as i32, y as i32),
+                ));
+            }
         }
+        _ => {}
+    }
 
-        if let Err(e) = win.show() {
-            warn!("Failed to show floating-bar window: {e}");
-        } else {
-            debug!("Floating-bar window shown");
-        }
+    // Force always-on-top.
+    let _ = win.set_always_on_top(true);
+
+    // Elevate to NSStatusWindowLevel (25) on macOS.
+    #[cfg(target_os = "macos")]
+    set_ns_window_level_status(&win);
+
+    // Visible on all workspaces.
+    let _ = win.set_visible_on_all_workspaces(true);
+
+    if let Err(e) = win.show() {
+        error!("Failed to show floating-bar window: {e}");
     } else {
-        warn!("floating-bar window not found");
+        info!("Floating-bar window shown");
     }
 }
 
