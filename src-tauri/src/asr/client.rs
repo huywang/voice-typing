@@ -1,7 +1,9 @@
 use base64::Engine;
+use futures_util::StreamExt;
 use log::{debug, info, warn};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::time::Instant;
 
 /// DashScope OpenAI-compatible endpoint for Qwen-ASR.
 const DASHSCOPE_ASR_URL: &str =
@@ -28,7 +30,10 @@ impl AsrClient {
 
     /// Recognize speech from WAV audio data.
     ///
-    /// Sends the audio as base64 to Qwen-ASR via the OpenAI-compatible API.
+    /// Sends the audio as base64 to Qwen-ASR via the OpenAI-compatible API
+    /// using SSE streaming. This reduces perceived latency by starting to
+    /// process the response as soon as the first token arrives, rather than
+    /// waiting for the full response.
     pub async fn recognize(&self, wav_data: &[u8]) -> Result<String, AsrError> {
         if wav_data.is_empty() {
             return Err(AsrError::EmptyAudio);
@@ -39,7 +44,7 @@ impl AsrClient {
         let data_url = format!("data:audio/wav;base64,{audio_base64}");
 
         info!(
-            "ASR request: {} bytes WAV -> {} bytes base64",
+            "ASR request: {} bytes WAV -> {} bytes base64 (streaming)",
             wav_data.len(),
             audio_base64.len()
         );
@@ -57,9 +62,10 @@ impl AsrClient {
                     }
                 }]),
             }],
-            stream: false,
+            stream: true,
         };
 
+        let request_start = Instant::now();
         let response = self
             .http
             .post(DASHSCOPE_ASR_URL)
@@ -73,34 +79,81 @@ impl AsrClient {
         let status = response.status();
         debug!("ASR response status: {}", status);
 
-        let body = response
-            .text()
-            .await
-            .map_err(|e| AsrError::NetworkError(format!("Failed to read response: {e}")))?;
-
         if !status.is_success() {
+            let body = response
+                .text()
+                .await
+                .map_err(|e| AsrError::NetworkError(format!("Failed to read error body: {e}")))?;
             warn!("ASR API error: HTTP {status}, body: {body}");
             return Err(AsrError::ApiError(format!("HTTP {status}: {body}")));
         }
 
-        debug!("ASR response body: {}", body);
+        // Read SSE stream and accumulate text deltas.
+        let mut full_text = String::new();
+        let mut byte_stream = response.bytes_stream();
+        let mut buffer = String::new();
+        let mut first_token_logged = false;
 
-        let chat_response: ChatResponse = serde_json::from_str(&body).map_err(|e| {
-            AsrError::ParseError(format!("Failed to parse response: {e}, body: {body}"))
-        })?;
+        while let Some(chunk) = byte_stream.next().await {
+            let chunk =
+                chunk.map_err(|e| AsrError::NetworkError(format!("Stream read error: {e}")))?;
+            buffer.push_str(&String::from_utf8_lossy(&chunk));
 
-        let text = chat_response
-            .choices
-            .first()
-            .map(|c| c.message.content.trim().to_string())
-            .unwrap_or_default();
+            // Process all complete lines in the buffer.
+            loop {
+                match buffer.find('\n') {
+                    None => break,
+                    Some(pos) => {
+                        let line = buffer[..pos].trim().to_string();
+                        buffer = buffer[pos + 1..].to_string();
 
-        if text.is_empty() {
-            warn!("ASR returned empty result, response body: {body}");
+                        if line.starts_with("data: [DONE]") {
+                            debug!("ASR SSE stream: received [DONE]");
+                            break;
+                        }
+
+                        if let Some(json_str) = line.strip_prefix("data: ") {
+                            match serde_json::from_str::<StreamChunk>(json_str) {
+                                Ok(chunk_resp) => {
+                                    if let Some(content) = chunk_resp
+                                        .choices
+                                        .first()
+                                        .and_then(|c| c.delta.content.as_deref())
+                                    {
+                                        if !first_token_logged {
+                                            info!(
+                                                "ASR first token received in {:.1}s",
+                                                request_start.elapsed().as_secs_f64()
+                                            );
+                                            first_token_logged = true;
+                                        }
+                                        full_text.push_str(content);
+                                    }
+                                }
+                                Err(e) => {
+                                    debug!("ASR SSE: failed to parse chunk (skipping): {e}, line: {line}");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let full_text = full_text.trim().to_string();
+
+        if full_text.is_empty() {
+            warn!("ASR streaming returned empty result");
             return Err(AsrError::EmptyResult);
         }
 
-        Ok(text)
+        info!(
+            "ASR streaming completed in {:.1}s: \"{}\"",
+            request_start.elapsed().as_secs_f64(),
+            full_text
+        );
+
+        Ok(full_text)
     }
 }
 
@@ -119,21 +172,41 @@ struct ChatMessage {
     content: serde_json::Value,
 }
 
-// --- Response types ---
+// --- Non-streaming response types (kept for unit tests) ---
 
 #[derive(Debug, Deserialize)]
+#[cfg_attr(not(test), allow(dead_code))]
 struct ChatResponse {
     choices: Vec<ChatChoice>,
 }
 
 #[derive(Debug, Deserialize)]
+#[cfg_attr(not(test), allow(dead_code))]
 struct ChatChoice {
     message: ChatResponseMessage,
 }
 
 #[derive(Debug, Deserialize)]
+#[cfg_attr(not(test), allow(dead_code))]
 struct ChatResponseMessage {
     content: String,
+}
+
+// --- Streaming SSE response types ---
+
+#[derive(Debug, Deserialize)]
+struct StreamChunk {
+    choices: Vec<StreamChoice>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StreamChoice {
+    delta: StreamDelta,
+}
+
+#[derive(Debug, Deserialize)]
+struct StreamDelta {
+    content: Option<String>,
 }
 
 /// Errors that can occur during ASR.
@@ -149,6 +222,7 @@ pub enum AsrError {
     ApiError(String),
 
     #[error("Failed to parse API response: {0}")]
+    #[allow(dead_code)]
     ParseError(String),
 
     #[error("ASR returned empty result")]
@@ -193,5 +267,23 @@ mod tests {
         let json = r#"{"choices": []}"#;
         let response: ChatResponse = serde_json::from_str(json).unwrap();
         assert!(response.choices.is_empty());
+    }
+
+    #[test]
+    fn test_parse_stream_chunk() {
+        let json = r#"{"choices":[{"delta":{"content":"你好"},"index":0}]}"#;
+        let chunk: StreamChunk = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            chunk.choices[0].delta.content.as_deref().unwrap(),
+            "你好"
+        );
+    }
+
+    #[test]
+    fn test_parse_stream_chunk_empty_delta() {
+        // Some chunks arrive with no content field (e.g. finish_reason chunks).
+        let json = r#"{"choices":[{"delta":{},"index":0,"finish_reason":"stop"}]}"#;
+        let chunk: StreamChunk = serde_json::from_str(json).unwrap();
+        assert!(chunk.choices[0].delta.content.is_none());
     }
 }

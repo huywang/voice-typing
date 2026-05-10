@@ -106,30 +106,27 @@ fn show_floating_bar(app: &AppHandle) {
     };
 
     // Position the bar on the monitor that contains the cursor.
-    match (win.available_monitors(), win.cursor_position()) {
-        (Ok(monitors), Ok(cursor)) => {
-            let target = monitors.iter().find(|m| {
-                let pos = m.position();
-                let size = m.size();
-                cursor.x >= pos.x as f64
-                    && cursor.x < (pos.x + size.width as i32) as f64
-                    && cursor.y >= pos.y as f64
-                    && cursor.y < (pos.y + size.height as i32) as f64
-            });
+    if let (Ok(monitors), Ok(cursor)) = (win.available_monitors(), win.cursor_position()) {
+        let target = monitors.iter().find(|m| {
+            let pos = m.position();
+            let size = m.size();
+            cursor.x >= pos.x as f64
+                && cursor.x < (pos.x + size.width as i32) as f64
+                && cursor.y >= pos.y as f64
+                && cursor.y < (pos.y + size.height as i32) as f64
+        });
 
-            if let Some(monitor) = target {
-                let pos = monitor.position();
-                let size = monitor.size();
-                let bar_width = 280.0_f64;
-                let bar_height = 40.0_f64;
-                let x = pos.x as f64 + (size.width as f64 - bar_width) / 2.0;
-                let y = pos.y as f64 + size.height as f64 - bar_height - 40.0;
-                let _ = win.set_position(tauri::Position::Physical(
-                    tauri::PhysicalPosition::new(x as i32, y as i32),
-                ));
-            }
+        if let Some(monitor) = target {
+            let pos = monitor.position();
+            let size = monitor.size();
+            let bar_width = 280.0_f64;
+            let bar_height = 40.0_f64;
+            let x = pos.x as f64 + (size.width as f64 - bar_width) / 2.0;
+            let y = pos.y as f64 + size.height as f64 - bar_height - 40.0;
+            let _ = win.set_position(tauri::Position::Physical(
+                tauri::PhysicalPosition::new(x as i32, y as i32),
+            ));
         }
-        _ => {}
     }
 
     // Force always-on-top.

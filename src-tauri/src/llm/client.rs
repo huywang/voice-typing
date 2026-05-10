@@ -1,6 +1,8 @@
+use futures_util::StreamExt;
 use log::{debug, info, warn};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::time::Instant;
 
 /// Alibaba Cloud DashScope (Qwen) API endpoint.
 const DASHSCOPE_LLM_URL: &str =
@@ -59,6 +61,106 @@ impl LlmClient {
         self.enabled
     }
 
+    /// Send a streaming chat request and return the accumulated full response text.
+    ///
+    /// Uses Server-Sent Events (SSE) to read the response incrementally, logging
+    /// the time-to-first-token for latency monitoring. The final complete text is
+    /// returned once the stream is finished.
+    async fn send_streaming_request(
+        &self,
+        label: &str,
+        request_body: &ChatRequest,
+    ) -> Result<String, LlmError> {
+        let request_start = Instant::now();
+
+        let response = self
+            .http
+            .post(DASHSCOPE_LLM_URL)
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header("Content-Type", "application/json")
+            .json(request_body)
+            .send()
+            .await
+            .map_err(|e| LlmError::NetworkError(format!("{e}")))?;
+
+        let status = response.status();
+        debug!("LLM {} response status: {}", label, status);
+
+        if !status.is_success() {
+            let body = response
+                .text()
+                .await
+                .map_err(|e| LlmError::NetworkError(format!("Failed to read error body: {e}")))?;
+            warn!("LLM {} API error: HTTP {status}, body: {body}", label);
+            return Err(LlmError::ApiError(format!("HTTP {status}: {body}")));
+        }
+
+        // Read the SSE stream and concatenate content deltas.
+        let mut full_text = String::new();
+        let mut byte_stream = response.bytes_stream();
+        let mut buffer = String::new();
+        let mut first_token_logged = false;
+
+        while let Some(chunk) = byte_stream.next().await {
+            let chunk = chunk
+                .map_err(|e| LlmError::NetworkError(format!("Stream read error: {e}")))?;
+            buffer.push_str(&String::from_utf8_lossy(&chunk));
+
+            // Process all complete lines accumulated in the buffer.
+            loop {
+                match buffer.find('\n') {
+                    None => break,
+                    Some(pos) => {
+                        let line = buffer[..pos].trim().to_string();
+                        buffer = buffer[pos + 1..].to_string();
+
+                        if line.starts_with("data: [DONE]") {
+                            debug!("LLM {} SSE stream: received [DONE]", label);
+                            break;
+                        }
+
+                        if let Some(json_str) = line.strip_prefix("data: ") {
+                            match serde_json::from_str::<StreamChunk>(json_str) {
+                                Ok(chunk_resp) => {
+                                    if let Some(content) = chunk_resp
+                                        .choices
+                                        .first()
+                                        .and_then(|c| c.delta.content.as_deref())
+                                    {
+                                        if !first_token_logged {
+                                            info!(
+                                                "LLM {} first token in {:.1}s",
+                                                label,
+                                                request_start.elapsed().as_secs_f64()
+                                            );
+                                            first_token_logged = true;
+                                        }
+                                        full_text.push_str(content);
+                                    }
+                                }
+                                Err(e) => {
+                                    debug!(
+                                        "LLM {} SSE: failed to parse chunk (skipping): {e}, line: {line}",
+                                        label
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        debug!(
+            "LLM {} streaming completed in {:.1}s, {} chars",
+            label,
+            request_start.elapsed().as_secs_f64(),
+            full_text.len()
+        );
+
+        Ok(full_text.trim().to_string())
+    }
+
     /// Polish the raw ASR text using Qwen LLM.
     ///
     /// If polishing is disabled, returns the raw text unchanged.
@@ -115,43 +217,21 @@ impl LlmClient {
             ],
             max_tokens: 2048,
             temperature: 0.3,
+            stream: true,
         };
 
-        let response = self
-            .http
-            .post(DASHSCOPE_LLM_URL)
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .header("Content-Type", "application/json")
-            .json(&request_body)
-            .send()
-            .await
-            .map_err(|e| LlmError::NetworkError(format!("{e}")))?;
+        let polished = self
+            .send_streaming_request("polish", &request_body)
+            .await?;
 
-        let status = response.status();
-        debug!("LLM response status: {}", status);
+        // Fall back to raw text if the LLM returned nothing.
+        let result = if polished.is_empty() {
+            raw_text.to_string()
+        } else {
+            polished
+        };
 
-        let body = response
-            .text()
-            .await
-            .map_err(|e| LlmError::NetworkError(format!("Failed to read response: {e}")))?;
-
-        if !status.is_success() {
-            warn!("LLM API error: HTTP {status}, body: {body}");
-            return Err(LlmError::ApiError(format!("HTTP {status}: {body}")));
-        }
-
-        debug!("LLM response body: {}", body);
-
-        let chat_response: ChatResponse = serde_json::from_str(&body)
-            .map_err(|e| LlmError::ParseError(format!("Failed to parse response: {e}")))?;
-
-        let polished = chat_response
-            .choices
-            .first()
-            .map(|c| c.message.content.trim().to_string())
-            .unwrap_or_else(|| raw_text.to_string());
-
-        Ok(polished)
+        Ok(result)
     }
 
     /// Edit `selected_text` according to `voice_command` using Qwen LLM.
@@ -197,49 +277,27 @@ impl LlmClient {
             ],
             max_tokens: 2048,
             temperature: 0.3,
+            stream: true,
         };
 
-        let response = self
-            .http
-            .post(DASHSCOPE_LLM_URL)
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .header("Content-Type", "application/json")
-            .json(&request_body)
-            .send()
-            .await
-            .map_err(|e| LlmError::NetworkError(format!("{e}")))?;
+        let edited = self
+            .send_streaming_request("edit_text", &request_body)
+            .await?;
 
-        let status = response.status();
-        debug!("LLM edit_text response status: {}", status);
-
-        let body = response
-            .text()
-            .await
-            .map_err(|e| LlmError::NetworkError(format!("Failed to read response: {e}")))?;
-
-        if !status.is_success() {
-            warn!("LLM edit_text API error: HTTP {status}, body: {body}");
-            return Err(LlmError::ApiError(format!("HTTP {status}: {body}")));
-        }
-
-        debug!("LLM edit_text response body: {}", body);
-
-        let chat_response: ChatResponse = serde_json::from_str(&body)
-            .map_err(|e| LlmError::ParseError(format!("Failed to parse response: {e}")))?;
-
-        let edited = chat_response
-            .choices
-            .first()
-            .map(|c| c.message.content.trim().to_string())
-            .unwrap_or_else(|| selected_text.to_string());
+        // Fall back to original selection if the LLM returned nothing.
+        let result = if edited.is_empty() {
+            selected_text.to_string()
+        } else {
+            edited
+        };
 
         info!(
             "LLM edit_text result: \"{}\" -> \"{}\"",
             &selected_text[..selected_text.len().min(60)],
-            &edited[..edited.len().min(60)]
+            &result[..result.len().min(60)]
         );
 
-        Ok(edited)
+        Ok(result)
     }
 
     /// Translate `text` into `target_language` using Qwen LLM.
@@ -270,43 +328,21 @@ impl LlmClient {
             ],
             max_tokens: 2048,
             temperature: 0.3,
+            stream: true,
         };
 
-        let response = self
-            .http
-            .post(DASHSCOPE_LLM_URL)
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .header("Content-Type", "application/json")
-            .json(&request_body)
-            .send()
-            .await
-            .map_err(|e| LlmError::NetworkError(format!("{e}")))?;
+        let translated = self
+            .send_streaming_request("translate", &request_body)
+            .await?;
 
-        let status = response.status();
-        debug!("LLM translate response status: {}", status);
+        // Fall back to original text if the LLM returned nothing.
+        let result = if translated.is_empty() {
+            text.to_string()
+        } else {
+            translated
+        };
 
-        let body = response
-            .text()
-            .await
-            .map_err(|e| LlmError::NetworkError(format!("Failed to read response: {e}")))?;
-
-        if !status.is_success() {
-            warn!("LLM translate API error: HTTP {status}, body: {body}");
-            return Err(LlmError::ApiError(format!("HTTP {status}: {body}")));
-        }
-
-        debug!("LLM translate response body: {}", body);
-
-        let chat_response: ChatResponse = serde_json::from_str(&body)
-            .map_err(|e| LlmError::ParseError(format!("Failed to parse response: {e}")))?;
-
-        let translated = chat_response
-            .choices
-            .first()
-            .map(|c| c.message.content.trim().to_string())
-            .unwrap_or_else(|| text.to_string());
-
-        Ok(translated)
+        Ok(result)
     }
 }
 
@@ -318,6 +354,7 @@ struct ChatRequest {
     messages: Vec<ChatMessage>,
     max_tokens: u32,
     temperature: f32,
+    stream: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -326,16 +363,35 @@ struct ChatMessage {
     content: String,
 }
 
-// --- Response types ---
+// --- Non-streaming response types (kept for unit tests) ---
 
 #[derive(Debug, Deserialize)]
+#[cfg_attr(not(test), allow(dead_code))]
 struct ChatResponse {
     choices: Vec<ChatChoice>,
 }
 
 #[derive(Debug, Deserialize)]
+#[cfg_attr(not(test), allow(dead_code))]
 struct ChatChoice {
     message: ChatMessage,
+}
+
+// --- Streaming SSE response types ---
+
+#[derive(Debug, Deserialize)]
+struct StreamChunk {
+    choices: Vec<StreamChoice>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StreamChoice {
+    delta: StreamDelta,
+}
+
+#[derive(Debug, Deserialize)]
+struct StreamDelta {
+    content: Option<String>,
 }
 
 /// Errors that can occur during LLM polishing.
@@ -349,6 +405,7 @@ pub enum LlmError {
     ApiError(String),
 
     #[error("Failed to parse API response: {0}")]
+    #[allow(dead_code)]
     ParseError(String),
 }
 
@@ -422,5 +479,23 @@ mod tests {
             response.choices[0].message.content,
             "今天天气不错，我们出去走走。"
         );
+    }
+
+    #[test]
+    fn test_parse_stream_chunk() {
+        let json = r#"{"choices":[{"delta":{"content":"你好"},"index":0}]}"#;
+        let chunk: StreamChunk = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            chunk.choices[0].delta.content.as_deref().unwrap(),
+            "你好"
+        );
+    }
+
+    #[test]
+    fn test_parse_stream_chunk_no_content() {
+        // finish_reason chunks arrive with an empty delta (no content field).
+        let json = r#"{"choices":[{"delta":{},"index":0,"finish_reason":"stop"}]}"#;
+        let chunk: StreamChunk = serde_json::from_str(json).unwrap();
+        assert!(chunk.choices[0].delta.content.is_none());
     }
 }
