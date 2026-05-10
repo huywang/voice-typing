@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
 interface SettingsProps {
@@ -9,8 +9,23 @@ interface SettingsProps {
 function Settings({ onBack, onSave }: SettingsProps) {
   const [apiKey, setApiKey] = useState("");
   const [llmEnabled, setLlmEnabled] = useState(true);
+  const [autostartEnabled, setAutostartEnabled] = useState(false);
+  const [soundEnabled, setSoundEnabled] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  // Load persisted toggles when the settings page mounts.
+  useEffect(() => {
+    invoke<boolean>("get_autostart_enabled")
+      .then((enabled) => setAutostartEnabled(enabled))
+      .catch((e) => console.error("Failed to get autostart state:", e));
+
+    invoke<boolean>("get_sound_enabled")
+      .then((enabled) => setSoundEnabled(enabled))
+      .catch(() => {
+        // Non-fatal: keep the default value of true.
+      });
+  }, []);
 
   const handleSave = async () => {
     if (!apiKey.trim()) {
@@ -26,6 +41,8 @@ function Settings({ onBack, onSave }: SettingsProps) {
         apiKey: apiKey.trim(),
         llmEnabled,
       });
+      await invoke("set_autostart_enabled", { enabled: autostartEnabled });
+      await invoke("set_sound_enabled", { enabled: soundEnabled });
       onSave();
     } catch (e) {
       setError(`Failed to save: ${e}`);
@@ -66,6 +83,34 @@ function Settings({ onBack, onSave }: SettingsProps) {
         </label>
         <p className="form-hint">
           When enabled, recognized text will be polished by Qwen LLM to remove filler words and fix punctuation.
+        </p>
+      </div>
+
+      <div className="form-group">
+        <label className="checkbox-label">
+          <input
+            type="checkbox"
+            checked={autostartEnabled}
+            onChange={(e) => setAutostartEnabled(e.target.checked)}
+          />
+          Launch at startup
+        </label>
+        <p className="form-hint">
+          Automatically start Voice Typing when you log in.
+        </p>
+      </div>
+
+      <div className="form-group">
+        <label className="checkbox-label">
+          <input
+            type="checkbox"
+            checked={soundEnabled}
+            onChange={(e) => setSoundEnabled(e.target.checked)}
+          />
+          Enable sound effects
+        </label>
+        <p className="form-hint">
+          Play a sound when recording starts, stops, or an error occurs.
         </p>
       </div>
 

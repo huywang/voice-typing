@@ -1,16 +1,112 @@
+/* ============================================================
+   CSS Variables — Light theme (default)
+   ============================================================ */
 :root {
+  /* Typography */
   font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
   font-size: 16px;
   line-height: 24px;
   font-weight: 400;
-  color: #0f0f0f;
-  background-color: #f6f6f6;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+
+  /* Background colors */
+  --bg-primary: #f6f6f6;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #f0f0f0;
+  --bg-overlay: rgba(0, 0, 0, 0.8);
+
+  /* Text colors */
+  --text-primary: #0f0f0f;
+  --text-secondary: #555;
+  --text-muted: #999;
+  --text-subtle: #666;
+
+  /* Border colors */
+  --border: #ddd;
+  --border-strong: #ccc;
+  --border-muted: #eee;
+
+  /* Accent / brand colors */
+  --accent: #396cd8;
+  --accent-hover: #2d5abc;
+
+  /* Status indicator colors (same in both modes) */
+  --status-idle: #4caf50;
+  --status-recording: #f44336;
+  --status-processing: #ff9800;
+  --status-default: #aaa;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 4px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 2px 8px rgba(0, 0, 0, 0.12);
+
+  /* Interactive elements */
+  --btn-bg: #ffffff;
+  --btn-text: #333;
+  --btn-border: #ddd;
+  --input-bg: #ffffff;
+  --input-text: #0f0f0f;
+  --kbd-bg: #e8e8e8;
+  --kbd-border: #ccc;
+  --history-duration-bg: #f0f0f0;
+  --history-duration-text: #666;
+  --history-preview-text: #333;
+  --detail-text-color: #555;
+
+  /* Apply root colors */
+  color: var(--text-primary);
+  background-color: var(--bg-primary);
 }
 
+/* ============================================================
+   CSS Variables — Dark theme override
+   ============================================================ */
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* Background colors */
+    --bg-primary: #1a1a1a;
+    --bg-secondary: #2a2a2a;
+    --bg-tertiary: #333;
+    --bg-overlay: rgba(0, 0, 0, 0.85);
+
+    /* Text colors */
+    --text-primary: #f6f6f6;
+    --text-secondary: #bbb;
+    --text-muted: #888;
+    --text-subtle: #aaa;
+
+    /* Border colors */
+    --border: #444;
+    --border-strong: #555;
+    --border-muted: #3a3a3a;
+
+    /* Shadows — slightly more visible on dark backgrounds */
+    --shadow-sm: 0 1px 4px rgba(0, 0, 0, 0.2);
+    --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.3);
+    --shadow-lg: 0 2px 8px rgba(0, 0, 0, 0.4);
+
+    /* Interactive elements */
+    --btn-bg: #2a2a2a;
+    --btn-text: #eee;
+    --btn-border: #444;
+    --input-bg: #2a2a2a;
+    --input-text: #eee;
+    --kbd-bg: #333;
+    --kbd-border: #555;
+    --history-duration-bg: #333;
+    --history-duration-text: #aaa;
+    --history-preview-text: #ddd;
+    --detail-text-color: #bbb;
+  }
+}
+
+/* ============================================================
+   Layout
+   ============================================================ */
 .container {
   margin: 0;
   padding: 24px;
@@ -26,7 +122,9 @@ h1 {
   font-size: 1.5em;
 }
 
-/* Status indicator */
+/* ============================================================
+   Status indicator
+   ============================================================ */
 .status-indicator {
   display: flex;
   align-items: center;
@@ -34,8 +132,8 @@ h1 {
   gap: 12px;
   padding: 16px;
   border-radius: 12px;
-  background: #ffffff;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  background: var(--bg-secondary);
+  box-shadow: var(--shadow-md);
   margin-bottom: 16px;
 }
 
@@ -43,20 +141,20 @@ h1 {
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  background: #aaa;
+  background: var(--status-default);
 }
 
 .status-dot.idle {
-  background: #4caf50;
+  background: var(--status-idle);
 }
 
 .status-dot.recording {
-  background: #f44336;
+  background: var(--status-recording);
   animation: pulse 1s infinite;
 }
 
 .status-dot.processing {
-  background: #ff9800;
+  background: var(--status-processing);
   animation: pulse 0.5s infinite;
 }
 
@@ -67,21 +165,23 @@ h1 {
 
 .status-text {
   font-size: 0.95em;
-  color: #555;
+  color: var(--text-secondary);
 }
 
-/* Last text */
+/* ============================================================
+   Last text
+   ============================================================ */
 .last-text {
   padding: 12px 16px;
-  background: #ffffff;
+  background: var(--bg-secondary);
   border-radius: 8px;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+  box-shadow: var(--shadow-sm);
   margin-bottom: 16px;
 }
 
 .last-text .label {
   font-size: 0.8em;
-  color: #999;
+  color: var(--text-muted);
   margin: 0 0 4px 0;
 }
 
@@ -90,10 +190,12 @@ h1 {
   font-size: 0.95em;
 }
 
-/* Hint */
+/* ============================================================
+   Hint
+   ============================================================ */
 .hint {
   text-align: center;
-  color: #999;
+  color: var(--text-muted);
   font-size: 0.85em;
   margin-top: auto;
   padding-top: 16px;
@@ -102,13 +204,16 @@ h1 {
 kbd {
   padding: 2px 6px;
   border-radius: 4px;
-  background: #e8e8e8;
-  border: 1px solid #ccc;
+  background: var(--kbd-bg);
+  border: 1px solid var(--kbd-border);
   font-size: 0.85em;
   font-family: inherit;
+  color: var(--text-primary);
 }
 
-/* Buttons */
+/* ============================================================
+   Buttons
+   ============================================================ */
 .actions {
   display: flex;
   justify-content: center;
@@ -118,20 +223,20 @@ kbd {
 
 button {
   border-radius: 8px;
-  border: 1px solid #ddd;
+  border: 1px solid var(--btn-border);
   padding: 8px 20px;
   font-size: 0.9em;
   font-weight: 500;
   font-family: inherit;
   cursor: pointer;
-  background: #ffffff;
-  color: #333;
+  background: var(--btn-bg);
+  color: var(--btn-text);
   transition: all 0.2s;
 }
 
 button:hover {
-  border-color: #396cd8;
-  color: #396cd8;
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 button:disabled {
@@ -140,16 +245,32 @@ button:disabled {
 }
 
 button.primary {
-  background: #396cd8;
+  background: var(--accent);
   color: white;
-  border-color: #396cd8;
+  border-color: var(--accent);
 }
 
 button.primary:hover {
-  background: #2d5abc;
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  color: white;
 }
 
-/* Settings form */
+button.danger {
+  background: var(--status-recording);
+  color: white;
+  border-color: var(--status-recording);
+}
+
+button.danger:hover {
+  background: #d32f2f;
+  border-color: #d32f2f;
+  color: white;
+}
+
+/* ============================================================
+   Settings form
+   ============================================================ */
 .settings .form-group {
   margin-bottom: 20px;
   text-align: left;
@@ -167,25 +288,27 @@ button.primary:hover {
   width: 100%;
   padding: 10px 12px;
   border-radius: 8px;
-  border: 1px solid #ddd;
+  border: 1px solid var(--border);
   font-size: 0.9em;
   box-sizing: border-box;
   outline: none;
   transition: border-color 0.2s;
+  background: var(--input-bg);
+  color: var(--input-text);
 }
 
 .settings input:focus {
-  border-color: #396cd8;
+  border-color: var(--accent);
 }
 
 .form-hint {
   font-size: 0.8em;
-  color: #999;
+  color: var(--text-muted);
   margin: 6px 0 0 0;
 }
 
 .form-hint a {
-  color: #396cd8;
+  color: var(--accent);
   text-decoration: none;
 }
 
@@ -199,15 +322,18 @@ button.primary:hover {
 .checkbox-label input[type="checkbox"] {
   width: 16px;
   height: 16px;
+  accent-color: var(--accent);
 }
 
 .error {
-  color: #f44336;
+  color: var(--status-recording);
   font-size: 0.85em;
   text-align: center;
 }
 
-/* Recording overlay */
+/* ============================================================
+   Recording overlay
+   ============================================================ */
 .recording-overlay {
   position: fixed;
   top: 12px;
@@ -218,7 +344,7 @@ button.primary:hover {
   gap: 8px;
   padding: 8px 16px;
   border-radius: 20px;
-  background: rgba(0, 0, 0, 0.8);
+  background: var(--bg-overlay);
   color: white;
   font-size: 0.85em;
   z-index: 9999;
@@ -232,19 +358,21 @@ button.primary:hover {
 }
 
 .overlay-dot.recording {
-  background: #f44336;
+  background: var(--status-recording);
   animation: pulse 1s infinite;
 }
 
 .overlay-dot.processing {
-  background: #ff9800;
+  background: var(--status-processing);
   animation: pulse 0.5s infinite;
 }
 
-/* History page */
+/* ============================================================
+   History page
+   ============================================================ */
 .history .empty-hint {
   text-align: center;
-  color: #999;
+  color: var(--text-muted);
   font-size: 0.9em;
   padding: 24px 0;
 }
@@ -257,19 +385,19 @@ button.primary:hover {
 
 .history-item {
   padding: 12px 16px;
-  background: #ffffff;
+  background: var(--bg-secondary);
   border-radius: 8px;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+  box-shadow: var(--shadow-sm);
   cursor: pointer;
   transition: box-shadow 0.2s;
 }
 
 .history-item:hover {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  box-shadow: var(--shadow-lg);
 }
 
 .history-item.expanded {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  box-shadow: var(--shadow-lg);
 }
 
 .history-item-header {
@@ -281,13 +409,13 @@ button.primary:hover {
 
 .history-timestamp {
   font-size: 0.8em;
-  color: #999;
+  color: var(--text-muted);
 }
 
 .history-duration {
   font-size: 0.75em;
-  color: #666;
-  background: #f0f0f0;
+  color: var(--history-duration-text);
+  background: var(--history-duration-bg);
   padding: 2px 8px;
   border-radius: 10px;
 }
@@ -295,14 +423,14 @@ button.primary:hover {
 .history-preview {
   margin: 0;
   font-size: 0.9em;
-  color: #333;
+  color: var(--history-preview-text);
   line-height: 1.4;
 }
 
 .history-detail {
   margin-top: 12px;
   padding-top: 12px;
-  border-top: 1px solid #eee;
+  border-top: 1px solid var(--border-muted);
 }
 
 .detail-section {
@@ -311,7 +439,7 @@ button.primary:hover {
 
 .detail-label {
   font-size: 0.75em;
-  color: #999;
+  color: var(--text-muted);
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -320,73 +448,6 @@ button.primary:hover {
 .detail-text {
   margin: 4px 0 0 0;
   font-size: 0.85em;
-  color: #555;
+  color: var(--detail-text-color);
   line-height: 1.5;
-}
-
-button.danger {
-  background: #f44336;
-  color: white;
-  border-color: #f44336;
-}
-
-button.danger:hover {
-  background: #d32f2f;
-}
-
-/* Dark mode */
-@media (prefers-color-scheme: dark) {
-  :root {
-    color: #f6f6f6;
-    background-color: #1a1a1a;
-  }
-
-  .status-indicator,
-  .last-text {
-    background: #2a2a2a;
-  }
-
-  button {
-    background: #2a2a2a;
-    color: #eee;
-    border-color: #444;
-  }
-
-  button.primary {
-    background: #396cd8;
-    color: white;
-  }
-
-  .settings input[type="password"],
-  .settings input[type="text"] {
-    background: #2a2a2a;
-    color: #eee;
-    border-color: #444;
-  }
-
-  kbd {
-    background: #333;
-    border-color: #555;
-  }
-
-  .history-item {
-    background: #2a2a2a;
-  }
-
-  .history-duration {
-    background: #333;
-    color: #aaa;
-  }
-
-  .history-preview {
-    color: #ddd;
-  }
-
-  .history-detail {
-    border-top-color: #444;
-  }
-
-  .detail-text {
-    color: #bbb;
-  }
 }

@@ -33,6 +33,8 @@ pub struct Pipeline {
     asr_client: Option<AsrClient>,
     llm_client: Option<LlmClient>,
     status: Arc<Mutex<AppStatus>>,
+    /// Cache of the most recent successfully injected transcription.
+    last_transcription: Arc<Mutex<Option<String>>>,
 }
 
 // Safety: The non-Send AudioRecorder lives inside a dedicated thread.
@@ -48,6 +50,7 @@ impl Pipeline {
             asr_client: None,
             llm_client: None,
             status: Arc::new(Mutex::new(AppStatus::Idle)),
+            last_transcription: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -119,6 +122,17 @@ impl Pipeline {
 
         info!("Audio thread ready");
         Ok(())
+    }
+
+    /// Cache the most recently injected transcription text.
+    pub fn set_last_transcription(&self, text: String) {
+        debug!("Caching last transcription ({} chars)", text.len());
+        *self.last_transcription.lock().unwrap() = Some(text);
+    }
+
+    /// Return the most recently cached transcription, if any.
+    pub fn last_transcription(&self) -> Option<String> {
+        self.last_transcription.lock().unwrap().clone()
     }
 
     pub fn start_recording(&mut self) -> Result<(), String> {

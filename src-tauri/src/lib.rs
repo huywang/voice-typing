@@ -5,6 +5,7 @@ mod history;
 mod injector;
 mod llm;
 mod pipeline;
+mod sound;
 mod tray;
 
 use chrono::Utc;
@@ -27,6 +28,10 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(PipelineState(Mutex::new(Pipeline::new())))
@@ -38,6 +43,10 @@ pub fn run() {
             commands::get_history,
             commands::clear_history,
             commands::get_history_count,
+            commands::get_autostart_enabled,
+            commands::set_autostart_enabled,
+            commands::get_sound_enabled,
+            commands::set_sound_enabled,
         ])
         .setup(|app| {
             // Initialize history database
@@ -66,6 +75,11 @@ pub fn run() {
                         .get("llm_enabled")
                         .and_then(|v| v.as_bool())
                         .unwrap_or(false);
+                    let sound_enabled = store
+                        .get("sound_enabled")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(true);
+                    debug!("sound_enabled restored from store: {sound_enabled}");
 
                     if let Some(key) = api_key {
                         if !key.is_empty() {
@@ -94,6 +108,15 @@ pub fn run() {
             app.global_shortcut().on_shortcut(
                 "CmdOrCtrl+Shift+Space",
                 move |_app, _shortcut, event| {
+                    // Read sound_enabled from store on every event so Settings
+                    // changes are picked up without a restart.
+                    let sound_on = handle
+                        .store("config.json")
+                        .ok()
+                        .and_then(|s| s.get("sound_enabled"))
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(true);
+
                     let state = handle.state::<PipelineState>();
                     match event.state {
                         ShortcutState::Pressed => {
@@ -101,12 +124,23 @@ pub fn run() {
                             let mut pipeline = state.0.lock().unwrap();
                             if let Err(e) = pipeline.start_recording() {
                                 error!("Failed to start recording: {e}");
+                                sound::play_error(sound_on);
+                            } else {
+                                sound::play_start(sound_on);
                             }
                         }
                         ShortcutState::Released => {
                             info!("Hotkey released — stopping recording and processing");
                             let handle2 = handle.clone();
                             tauri::async_runtime::spawn(async move {
+                                // Re-read inside the async task (store reads are cheap).
+                                let sound_on = handle2
+                                    .store("config.json")
+                                    .ok()
+                                    .and_then(|s| s.get("sound_enabled"))
+                                    .and_then(|v| v.as_bool())
+                                    .unwrap_or(true);
+
                                 let pipeline_start = Instant::now();
                                 let state = handle2.state::<PipelineState>();
 
@@ -117,6 +151,7 @@ pub fn run() {
                                         Some(a) => a,
                                         None => {
                                             error!("Audio not initialized — did you configure API key?");
+                                            sound::play_error(sound_on);
                                             return;
                                         }
                                     };
@@ -143,6 +178,7 @@ pub fn run() {
                                     }
                                     Err(e) => {
                                         warn!("WAV encoding failed: {e}");
+                                        sound::play_error(sound_on);
                                         let pipeline = state.0.lock().unwrap();
                                         pipeline.set_status(pipeline::AppStatus::Idle);
                                         return;
@@ -154,6 +190,7 @@ pub fn run() {
                                     Some(a) => a,
                                     None => {
                                         warn!("ASR not configured — please set API key in settings");
+                                        sound::play_error(sound_on);
                                         let pipeline = state.0.lock().unwrap();
                                         pipeline.set_status(pipeline::AppStatus::Idle);
                                         return;
@@ -172,6 +209,7 @@ pub fn run() {
                                     }
                                     Err(e) => {
                                         error!("ASR failed: {e}");
+                                        sound::play_error(sound_on);
                                         let pipeline = state.0.lock().unwrap();
                                         pipeline.set_status(pipeline::AppStatus::Idle);
                                         return;
@@ -219,17 +257,24 @@ pub fn run() {
                                     Ok(mut inj) => {
                                         if let Err(e) = inj.inject(&final_text) {
                                             error!("Text injection failed: {e}");
+                                            sound::play_error(sound_on);
                                             injection_ok = false;
                                         } else {
                                             info!(
                                                 "Text injected successfully ({} chars)",
                                                 final_text.len()
                                             );
+                                            // Play stop sound on successful injection.
+                                            sound::play_stop(sound_on);
+                                            // Cache for "paste last transcription" shortcut.
+                                            let pipeline = state.0.lock().unwrap();
+                                            pipeline.set_last_transcription(final_text.clone());
                                             injection_ok = true;
                                         }
                                     }
                                     Err(e) => {
                                         error!("Failed to init injector: {e}");
+                                        sound::play_error(sound_on);
                                         injection_ok = false;
                                     }
                                 }
@@ -268,6 +313,48 @@ pub fn run() {
             )?;
 
             info!("Global shortcut registered: CmdOrCtrl+Shift+Space");
+
+            // Secondary hotkey: re-inject the last transcription.
+            // Ctrl+Cmd+V on Mac / Ctrl+Alt+V on Win/Linux.
+            let handle2 = app.handle().clone();
+            app.global_shortcut().on_shortcut(
+                "CmdOrCtrl+Alt+V",
+                move |_app, _shortcut, event| {
+                    if event.state != ShortcutState::Pressed {
+                        return;
+                    }
+                    info!("Paste-last-transcription hotkey pressed");
+                    let state = handle2.state::<PipelineState>();
+                    let last = {
+                        let pipeline = state.0.lock().unwrap();
+                        pipeline.last_transcription()
+                    };
+                    match last {
+                        Some(text) => {
+                            match injector::TextInjector::new() {
+                                Ok(mut inj) => {
+                                    if let Err(e) = inj.inject(&text) {
+                                        error!("Failed to re-inject last transcription: {e}");
+                                    } else {
+                                        info!(
+                                            "Re-injected last transcription ({} chars)",
+                                            text.len()
+                                        );
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("Failed to init injector for re-inject: {e}");
+                                }
+                            }
+                        }
+                        None => {
+                            warn!("No previous transcription cached — nothing to re-inject");
+                        }
+                    }
+                },
+            )?;
+
+            info!("Global shortcut registered: CmdOrCtrl+Alt+V (paste last transcription)");
             Ok(())
         })
         .run(tauri::generate_context!())

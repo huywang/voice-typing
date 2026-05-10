@@ -3,6 +3,7 @@ use log::{debug, error, info, warn};
 use std::sync::Mutex;
 use std::time::Instant;
 use tauri::{AppHandle, State};
+use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
 use tauri_plugin_store::StoreExt;
 
 use crate::history::{HistoryDb, HistoryRecord};
@@ -169,9 +170,10 @@ pub async fn stop_and_process(
         final_text.len()
     );
 
-    // Update status
+    // Update status and cache last transcription for the paste-last shortcut.
     {
         let pipeline = state.0.lock().unwrap();
+        pipeline.set_last_transcription(final_text.clone());
         pipeline.set_status(AppStatus::Idle);
     }
 
@@ -214,4 +216,68 @@ pub fn clear_history(state: State<HistoryState>) -> Result<(), String> {
 #[tauri::command]
 pub fn get_history_count(state: State<HistoryState>) -> Result<u32, String> {
     state.0.count()
+}
+
+/// Get whether launch-at-startup is currently enabled.
+#[tauri::command]
+pub fn get_autostart_enabled(app: AppHandle) -> Result<bool, String> {
+    let enabled = app
+        .autolaunch()
+        .is_enabled()
+        .map_err(|e| {
+            error!("Failed to query autostart status: {e}");
+            format!("Failed to query autostart status: {e}")
+        })?;
+    debug!("Autostart enabled: {}", enabled);
+    Ok(enabled)
+}
+
+/// Enable or disable launch-at-startup.
+#[tauri::command]
+pub fn set_autostart_enabled(app: AppHandle, enabled: bool) -> Result<(), String> {
+    let autolaunch = app.autolaunch();
+    if enabled {
+        autolaunch.enable().map_err(|e| {
+            error!("Failed to enable autostart: {e}");
+            format!("Failed to enable autostart: {e}")
+        })?;
+        info!("Autostart enabled");
+    } else {
+        autolaunch.disable().map_err(|e| {
+            error!("Failed to disable autostart: {e}");
+            format!("Failed to disable autostart: {e}")
+        })?;
+        info!("Autostart disabled");
+    }
+    Ok(())
+}
+
+/// Get whether sound effects are enabled.
+#[tauri::command]
+pub fn get_sound_enabled(app: AppHandle) -> bool {
+    app.store("config.json")
+        .ok()
+        .and_then(|s| s.get("sound_enabled"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true)
+}
+
+/// Enable or disable interaction sound effects and persist the setting.
+#[tauri::command]
+pub fn set_sound_enabled(app: AppHandle, enabled: bool) -> Result<(), String> {
+    match app.store("config.json") {
+        Ok(store) => {
+            store.set("sound_enabled", serde_json::json!(enabled));
+            if let Err(e) = store.save() {
+                error!("Failed to save sound_enabled setting: {e}");
+                return Err(format!("Failed to save sound_enabled: {e}"));
+            }
+            info!("sound_enabled set to {enabled} and persisted");
+            Ok(())
+        }
+        Err(e) => {
+            error!("Failed to open config store for sound_enabled: {e}");
+            Err(format!("Failed to open config store: {e}"))
+        }
+    }
 }
