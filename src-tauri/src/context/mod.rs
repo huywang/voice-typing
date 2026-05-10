@@ -216,6 +216,7 @@ fn get_selected_text_via_applescript() -> Option<String> {
 /// This is less reliable than the Accessibility API approach because it
 /// temporarily clobbers the clipboard and introduces a short delay, but it
 /// works in more applications (e.g. Electron apps, web browsers).
+#[cfg(target_os = "macos")]
 fn get_selected_text_via_clipboard() -> Option<String> {
     use arboard::Clipboard;
 
