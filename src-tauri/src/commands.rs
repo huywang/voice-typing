@@ -38,6 +38,10 @@ pub struct FloatingStateData {
 /// Managed state for the floating bar, shared between the hotkey handler and commands.
 pub struct FloatingState(pub Mutex<FloatingStateData>);
 
+/// Managed state that temporarily holds the selected text captured when the
+/// speak-to-edit hotkey is pressed. Cleared after each edit pipeline run.
+pub struct EditContext(pub Mutex<Option<String>>);
+
 /// Get the current floating bar state (status + injected text).
 #[tauri::command]
 pub fn get_floating_state(state: State<FloatingState>) -> FloatingStateData {
@@ -1023,6 +1027,25 @@ pub async fn check_for_update(app: AppHandle) -> Result<Option<UpdateInfo>, Stri
             Err(format!("Update check failed: {e}"))
         }
     }
+}
+
+/// Get the currently selected text in the focused application.
+///
+/// On macOS, first tries the Accessibility API via AppleScript, then falls back
+/// to simulating Cmd+C and reading the clipboard.  Returns `None` when no text
+/// is selected or the feature is not supported on the current platform.
+///
+/// This is used by the speak-to-edit feature to provide surrounding context to
+/// the LLM so it can make edits that are aware of existing text.
+#[tauri::command]
+pub fn get_selected_text() -> Option<String> {
+    debug!("get_selected_text command invoked");
+    let result = crate::context::get_selected_text();
+    match &result {
+        Some(t) => info!("get_selected_text: returning {} chars", t.len()),
+        None => debug!("get_selected_text: no selected text"),
+    }
+    result
 }
 
 /// Download and install the latest available update, then restart the app.

@@ -10,6 +10,10 @@ const DASHSCOPE_LLM_URL: &str =
 const TRANSLATE_SYSTEM_PROMPT_TEMPLATE: &str =
     "你是一个翻译助手。将用户输入的文本翻译成{target_language}。只返回翻译结果，不要添加任何解释。保持原文的语气和风格。";
 
+/// System prompt for speak-to-edit: modify selected text according to a voice command.
+const EDIT_TEXT_SYSTEM_PROMPT: &str =
+    "你是一个文本编辑助手。用户会提供一段已选中的文本和一个语音指令。请根据指令修改文本。只返回修改后的文本，不要添加任何解释。";
+
 /// System prompt for text polishing.
 const POLISH_SYSTEM_PROMPT: &str = r#"你是一个语音转文字的后处理助手。你的任务是润色语音识别的原始文本，使其更加通顺自然。
 
@@ -148,6 +152,94 @@ impl LlmClient {
             .unwrap_or_else(|| raw_text.to_string());
 
         Ok(polished)
+    }
+
+    /// Edit `selected_text` according to `voice_command` using Qwen LLM.
+    ///
+    /// Used by the speak-to-edit feature. Returns the modified text, or an error
+    /// if the API call fails. On error the caller should fall back to leaving the
+    /// original selection unchanged.
+    pub async fn edit_text(
+        &self,
+        selected_text: &str,
+        voice_command: &str,
+    ) -> Result<String, LlmError> {
+        if selected_text.is_empty() {
+            debug!("LLM edit_text: empty selected text, skipping");
+            return Ok(String::new());
+        }
+        if voice_command.is_empty() {
+            debug!("LLM edit_text: empty voice command, returning selected text unchanged");
+            return Ok(selected_text.to_string());
+        }
+
+        info!(
+            "LLM edit_text request: command=\"{}\", text_len={}",
+            voice_command,
+            selected_text.len()
+        );
+
+        let user_message = format!(
+            "选中的文本：\n{selected_text}\n\n指令：{voice_command}"
+        );
+
+        let request_body = ChatRequest {
+            model: "qwen-plus".to_string(),
+            messages: vec![
+                ChatMessage {
+                    role: "system".to_string(),
+                    content: EDIT_TEXT_SYSTEM_PROMPT.to_string(),
+                },
+                ChatMessage {
+                    role: "user".to_string(),
+                    content: user_message,
+                },
+            ],
+            max_tokens: 2048,
+            temperature: 0.3,
+        };
+
+        let response = self
+            .http
+            .post(DASHSCOPE_LLM_URL)
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header("Content-Type", "application/json")
+            .json(&request_body)
+            .send()
+            .await
+            .map_err(|e| LlmError::NetworkError(format!("{e}")))?;
+
+        let status = response.status();
+        debug!("LLM edit_text response status: {}", status);
+
+        let body = response
+            .text()
+            .await
+            .map_err(|e| LlmError::NetworkError(format!("Failed to read response: {e}")))?;
+
+        if !status.is_success() {
+            warn!("LLM edit_text API error: HTTP {status}, body: {body}");
+            return Err(LlmError::ApiError(format!("HTTP {status}: {body}")));
+        }
+
+        debug!("LLM edit_text response body: {}", body);
+
+        let chat_response: ChatResponse = serde_json::from_str(&body)
+            .map_err(|e| LlmError::ParseError(format!("Failed to parse response: {e}")))?;
+
+        let edited = chat_response
+            .choices
+            .first()
+            .map(|c| c.message.content.trim().to_string())
+            .unwrap_or_else(|| selected_text.to_string());
+
+        info!(
+            "LLM edit_text result: \"{}\" -> \"{}\"",
+            &selected_text[..selected_text.len().min(60)],
+            &edited[..edited.len().min(60)]
+        );
+
+        Ok(edited)
     }
 
     /// Translate `text` into `target_language` using Qwen LLM.

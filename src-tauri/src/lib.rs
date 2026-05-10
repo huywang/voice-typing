@@ -10,7 +10,7 @@ mod sound;
 mod tray;
 
 use chrono::Utc;
-use commands::{CurrentHotkey, FloatingState, FloatingStateData, HistoryState, PipelineState};
+use commands::{CurrentHotkey, EditContext, FloatingState, FloatingStateData, HistoryState, PipelineState};
 use history::{HistoryDb, HistoryRecord};
 use log::{debug, error, info, warn};
 use pipeline::Pipeline;
@@ -398,6 +398,7 @@ pub fn run() {
             status: "idle".to_string(),
             text: String::new(),
         })))
+        .manage(EditContext(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![
             commands::get_status,
             commands::set_api_config,
@@ -437,6 +438,7 @@ pub fn run() {
             commands::set_blacklist,
             commands::check_for_update,
             commands::install_update,
+            commands::get_selected_text,
         ])
         .setup(|app| {
             // Initialize history database
@@ -909,6 +911,290 @@ pub fn run() {
             )?;
 
             info!("Global shortcut registered: CmdOrCtrl+Shift+T (translation mode)");
+
+            // Speak-to-edit hotkey: CmdOrCtrl+Shift+E
+            // Press: capture selected text + start recording.
+            // Release: stop recording, ASR -> LLM edit -> inject (replaces selection).
+            let handle_edit = app.handle().clone();
+            app.global_shortcut().on_shortcut(
+                "CmdOrCtrl+Shift+E",
+                move |_app, _shortcut, event| {
+                    let sound_on = handle_edit
+                        .store("config.json")
+                        .ok()
+                        .and_then(|s| s.get("sound_enabled"))
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(true);
+
+                    let state = handle_edit.state::<PipelineState>();
+                    match event.state {
+                        ShortcutState::Pressed => {
+                            info!("Speak-to-edit hotkey pressed — capturing selected text and starting recording");
+
+                            // Capture the currently selected text and store it before starting
+                            // recording (Cmd+C simulation in get_selected_text may change focus).
+                            let selected = context::get_selected_text();
+                            match &selected {
+                                Some(t) => info!("Speak-to-edit: captured {} chars of selected text", t.len()),
+                                None => warn!("Speak-to-edit: no text selected — edit will be skipped"),
+                            }
+                            {
+                                let edit_ctx = handle_edit.state::<EditContext>();
+                                let mut ctx = edit_ctx.0.lock().unwrap();
+                                *ctx = selected;
+                            }
+
+                            let mut pipeline = state.0.lock().unwrap();
+                            if let Err(e) = pipeline.start_recording() {
+                                error!("Failed to start recording (speak-to-edit): {e}");
+                                sound::play_error(sound_on);
+                            } else {
+                                sound::play_start(sound_on);
+                                // Show the floating bar so the user sees recording status.
+                                show_floating_bar(&handle_edit);
+                            }
+                        }
+                        ShortcutState::Released => {
+                            info!("Speak-to-edit hotkey released — stopping recording and processing");
+                            let handle2 = handle_edit.clone();
+                            tauri::async_runtime::spawn(async move {
+                                let sound_on = handle2
+                                    .store("config.json")
+                                    .ok()
+                                    .and_then(|s| s.get("sound_enabled"))
+                                    .and_then(|v| v.as_bool())
+                                    .unwrap_or(true);
+
+                                let pipeline_start = Instant::now();
+                                let state = handle2.state::<PipelineState>();
+
+                                // Extract selected text from EditContext before any await points.
+                                let selected_text = {
+                                    let edit_ctx = handle2.state::<EditContext>();
+                                    let mut ctx = edit_ctx.0.lock().unwrap();
+                                    ctx.take() // consume and clear the stored text
+                                };
+
+                                let selected_text = match selected_text {
+                                    Some(t) if !t.is_empty() => t,
+                                    _ => {
+                                        warn!("Speak-to-edit: no selected text was captured — aborting");
+                                        sound::play_error(sound_on);
+                                        // Still need to stop the audio recorder gracefully.
+                                        let pipeline = state.0.lock().unwrap();
+                                        if let Some(audio) = pipeline.audio_thread_ref() {
+                                            audio.buffer().stop();
+                                        }
+                                        pipeline.set_status(pipeline::AppStatus::Idle);
+                                        hide_floating_bar(&handle2);
+                                        return;
+                                    }
+                                };
+
+                                // Extract data under lock then drop it.
+                                let (wav_result, asr_client, llm_client) = {
+                                    let pipeline = state.0.lock().unwrap();
+                                    let audio = match pipeline.audio_thread_ref() {
+                                        Some(a) => a,
+                                        None => {
+                                            error!("Audio not initialized — did you configure API key?");
+                                            sound::play_error(sound_on);
+                                            hide_floating_bar(&handle2);
+                                            return;
+                                        }
+                                    };
+                                    audio.buffer().stop();
+                                    pipeline.set_status(pipeline::AppStatus::Processing);
+                                    let wav = audio.buffer().get_wav_data();
+                                    (
+                                        wav,
+                                        pipeline.asr_client().cloned(),
+                                        pipeline.llm_client().cloned(),
+                                    )
+                                };
+
+                                let wav_data = match wav_result {
+                                    Ok(d) => {
+                                        let duration_secs = d.len() as f64 / (16000.0 * 2.0);
+                                        info!(
+                                            "Speak-to-edit WAV encoded: {} bytes (~{:.1}s audio)",
+                                            d.len(),
+                                            duration_secs
+                                        );
+                                        d
+                                    }
+                                    Err(e) => {
+                                        warn!("WAV encoding failed (speak-to-edit): {e}");
+                                        sound::play_error(sound_on);
+                                        let pipeline = state.0.lock().unwrap();
+                                        pipeline.set_status(pipeline::AppStatus::Idle);
+                                        hide_floating_bar(&handle2);
+                                        return;
+                                    }
+                                };
+
+                                // ASR: transcribe the voice command.
+                                let asr = match asr_client {
+                                    Some(a) => a,
+                                    None => {
+                                        warn!("ASR not configured — please set API key in settings");
+                                        sound::play_error(sound_on);
+                                        let pipeline = state.0.lock().unwrap();
+                                        pipeline.set_status(pipeline::AppStatus::Idle);
+                                        hide_floating_bar(&handle2);
+                                        return;
+                                    }
+                                };
+
+                                let asr_start = Instant::now();
+                                let voice_command = match asr.recognize(&wav_data).await {
+                                    Ok(t) => {
+                                        info!(
+                                            "Speak-to-edit ASR completed in {:.1}s: \"{}\"",
+                                            asr_start.elapsed().as_secs_f64(),
+                                            t
+                                        );
+                                        t
+                                    }
+                                    Err(e) => {
+                                        error!("ASR failed (speak-to-edit): {e}");
+                                        sound::play_error(sound_on);
+                                        let pipeline = state.0.lock().unwrap();
+                                        pipeline.set_status(pipeline::AppStatus::Idle);
+                                        hide_floating_bar(&handle2);
+                                        return;
+                                    }
+                                };
+
+                                if voice_command.is_empty() {
+                                    warn!("Speak-to-edit: ASR returned empty command — aborting");
+                                    sound::play_error(sound_on);
+                                    let pipeline = state.0.lock().unwrap();
+                                    pipeline.set_status(pipeline::AppStatus::Idle);
+                                    hide_floating_bar(&handle2);
+                                    return;
+                                }
+
+                                // LLM edit: apply the voice command to the selected text.
+                                let edited_text = match &llm_client {
+                                    Some(llm) => {
+                                        let llm_start = Instant::now();
+                                        match llm.edit_text(&selected_text, &voice_command).await {
+                                            Ok(t) => {
+                                                info!(
+                                                    "LLM edit_text completed in {:.1}s",
+                                                    llm_start.elapsed().as_secs_f64()
+                                                );
+                                                t
+                                            }
+                                            Err(e) => {
+                                                error!("LLM edit_text failed: {e}");
+                                                sound::play_error(sound_on);
+                                                let pipeline = state.0.lock().unwrap();
+                                                pipeline.set_status(pipeline::AppStatus::Idle);
+                                                hide_floating_bar(&handle2);
+                                                return;
+                                            }
+                                        }
+                                    }
+                                    None => {
+                                        warn!("LLM not configured — speak-to-edit requires LLM; aborting");
+                                        sound::play_error(sound_on);
+                                        let pipeline = state.0.lock().unwrap();
+                                        pipeline.set_status(pipeline::AppStatus::Idle);
+                                        hide_floating_bar(&handle2);
+                                        return;
+                                    }
+                                };
+
+                                // Detect the focused app to decide injection method.
+                                let edit_app_name = context::get_frontmost_app_name();
+                                let custom_blacklist: Vec<String> = handle2
+                                    .store("config.json")
+                                    .ok()
+                                    .and_then(|s| {
+                                        s.get("app_blacklist")
+                                            .and_then(|v| serde_json::from_value(v).ok())
+                                    })
+                                    .unwrap_or_default();
+                                let use_clipboard =
+                                    context::is_blacklisted(&edit_app_name, &custom_blacklist);
+                                if use_clipboard {
+                                    info!(
+                                        "Speak-to-edit: app '{}' is blacklisted — using clipboard paste",
+                                        edit_app_name
+                                    );
+                                }
+
+                                // Inject the edited text — it replaces the current selection naturally.
+                                let injection_ok;
+                                match injector::TextInjector::new() {
+                                    Ok(mut inj) => {
+                                        if let Err(e) =
+                                            inj.inject_smart(&edited_text, use_clipboard)
+                                        {
+                                            error!("Text injection failed (speak-to-edit): {e}");
+                                            sound::play_error(sound_on);
+                                            injection_ok = false;
+                                        } else {
+                                            info!(
+                                                "Speak-to-edit: injected {} chars (replacing selection)",
+                                                edited_text.len()
+                                            );
+                                            sound::play_stop(sound_on);
+                                            let pipeline = state.0.lock().unwrap();
+                                            pipeline.set_last_transcription(
+                                                voice_command.clone(),
+                                                edited_text.clone(),
+                                            );
+                                            injection_ok = true;
+                                        }
+                                    }
+                                    Err(e) => {
+                                        error!("Failed to init injector (speak-to-edit): {e}");
+                                        sound::play_error(sound_on);
+                                        injection_ok = false;
+                                    }
+                                }
+
+                                // Save to history after successful injection.
+                                if injection_ok {
+                                    let duration_secs = wav_data.len() as f64 / (16000.0 * 2.0);
+                                    let history_state = handle2.state::<HistoryState>();
+                                    let record = HistoryRecord {
+                                        id: 0,
+                                        timestamp: Utc::now().to_rfc3339(),
+                                        raw_text: voice_command,
+                                        polished_text: edited_text.clone(),
+                                        duration_secs,
+                                        app_name: edit_app_name,
+                                    };
+                                    if let Err(e) = history_state.0.insert(&record) {
+                                        error!("Failed to save speak-to-edit history record: {e}");
+                                    } else {
+                                        info!("Speak-to-edit history record saved");
+                                    }
+                                }
+
+                                info!(
+                                    "Speak-to-edit pipeline completed in {:.1}s",
+                                    pipeline_start.elapsed().as_secs_f64()
+                                );
+
+                                let pipeline = state.0.lock().unwrap();
+                                pipeline.set_status(pipeline::AppStatus::Idle);
+                                if injection_ok {
+                                    set_floating_result(&handle2, &edited_text);
+                                } else {
+                                    hide_floating_bar(&handle2);
+                                }
+                            });
+                        }
+                    }
+                },
+            )?;
+
+            info!("Global shortcut registered: CmdOrCtrl+Shift+E (speak-to-edit)");
 
             // Check for updates in the background on startup so the About tab
             // can reflect availability without blocking the main window.
