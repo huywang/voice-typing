@@ -3,6 +3,7 @@
 //! On macOS, plays system sounds via `afplay`. On other platforms, sound
 //! playback is silently skipped so the rest of the app is unaffected.
 
+#[allow(unused_imports)]
 use log::{debug, warn};
 
 /// Plays the "recording started" sound.

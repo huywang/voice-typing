@@ -1,3 +1,4 @@
+#[allow(unused_imports)]
 use log::{debug, info, warn};
 
 /// Built-in list of applications where enigo's direct key simulation is known
