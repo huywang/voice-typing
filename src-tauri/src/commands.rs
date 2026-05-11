@@ -1014,7 +1014,7 @@ pub async fn submit_feedback(
     // can submit feedback without configuring anything.  Falls back to
     // a user-configured token in the store if the env var was not set at
     // build time.
-    let token = option_env!("GITHUB_BOT_TOKEN")
+    let token = option_env!("FEEDBACK_BOT_TOKEN")
         .map(String::from)
         .filter(|t| !t.is_empty())
         .or_else(|| {

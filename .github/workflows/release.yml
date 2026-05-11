@@ -60,6 +60,7 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FEEDBACK_BOT_TOKEN: ${{ secrets.FEEDBACK_BOT_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Voice Typing ${{ github.ref_name }}"
