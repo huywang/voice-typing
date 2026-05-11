@@ -47,7 +47,7 @@ function Settings({ onBack }: SettingsProps) {
 
   // General tab state
   const [apiKey, setApiKey] = useState("");
-  const [githubToken, setGithubToken] = useState("");
+
   const [autostartEnabled, setAutostartEnabled] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [dockVisible, setDockVisible] = useState(true);
@@ -298,15 +298,6 @@ function Settings({ onBack }: SettingsProps) {
     }
   };
 
-  const handleGithubTokenBlur = async () => {
-    try {
-      await invoke("set_github_token", { token: githubToken });
-      setStatus("githubToken", "saved");
-    } catch {
-      setStatus("githubToken", "error");
-    }
-  };
-
   // Send a silent test WAV to verify the API key is valid.
   const handleTestApiKey = async () => {
     const trimmed = apiKey.trim();
@@ -503,28 +494,6 @@ function Settings({ onBack }: SettingsProps) {
                   Alibaba Cloud DashScope
                 </a>
                 . Saved automatically when you leave this field.
-              </p>
-            </div>
-
-            <div className="form-group">
-              <label htmlFor="github-token">
-                GitHub Token
-                {renderFieldStatus("githubToken")}
-              </label>
-              <input
-                id="github-token"
-                type="password"
-                value={githubToken}
-                onChange={(e) => setGithubToken(e.target.value)}
-                onBlur={handleGithubTokenBlur}
-                placeholder="ghp_..."
-              />
-              <p className="form-hint">
-                Required for submitting feedback. Create a token at{" "}
-                <a href="https://github.com/settings/tokens" target="_blank">
-                  github.com/settings/tokens
-                </a>{" "}
-                with <code>public_repo</code> scope. Saved automatically when you leave this field.
               </p>
             </div>
 

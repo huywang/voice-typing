@@ -1010,20 +1010,27 @@ pub async fn submit_feedback(
         return Err("Title cannot be empty".to_string());
     }
 
-    // Retrieve the optional GitHub token from the config store.
-    let token = app
-        .store("config.json")
-        .ok()
-        .and_then(|s| s.get("github_token"))
-        .and_then(|v| v.as_str().map(String::from))
-        .filter(|t| !t.trim().is_empty());
+    // Use the built-in bot token (embedded at compile time) so end users
+    // can submit feedback without configuring anything.  Falls back to
+    // a user-configured token in the store if the env var was not set at
+    // build time.
+    let token = option_env!("GITHUB_BOT_TOKEN")
+        .map(String::from)
+        .filter(|t| !t.is_empty())
+        .or_else(|| {
+            app.store("config.json")
+                .ok()
+                .and_then(|s| s.get("github_token"))
+                .and_then(|v| v.as_str().map(String::from))
+                .filter(|t| !t.trim().is_empty())
+        });
 
     let token = match token {
         Some(t) => t,
         None => {
-            warn!("submit_feedback: no GitHub token configured");
+            warn!("submit_feedback: no GitHub token available");
             return Err(
-                "No GitHub token configured. Please add your GitHub token in Settings → General."
+                "Feedback submission is not available. Please contact the developer."
                     .to_string(),
             );
         }
