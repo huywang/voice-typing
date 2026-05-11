@@ -503,6 +503,8 @@ pub fn run() {
             commands::check_for_update,
             commands::install_update,
             commands::get_selected_text,
+            commands::submit_feedback,
+            commands::set_github_token,
         ])
         .setup(|app| {
             // Initialize history database

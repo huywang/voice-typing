@@ -984,6 +984,122 @@ pub fn set_hotkey(
     Ok(())
 }
 
+// ─── Feedback ─────────────────────────────────────────────────────────────────
+
+/// Submit a feature request or bug report as a GitHub Issue.
+///
+/// If a `github_token` is stored in the config, the issue is created directly
+/// via the GitHub API and the issue URL is returned.  When no token is
+/// configured the command returns an error asking the user to set one up.
+#[tauri::command]
+pub async fn submit_feedback(
+    app: AppHandle,
+    feedback_type: String, // "feature" or "bug"
+    title: String,
+    description: String,
+) -> Result<String, String> {
+    info!(
+        "submit_feedback: type={} title=\"{}\"",
+        feedback_type, title
+    );
+
+    let title = title.trim().to_string();
+    let description = description.trim().to_string();
+
+    if title.is_empty() {
+        return Err("Title cannot be empty".to_string());
+    }
+
+    // Retrieve the optional GitHub token from the config store.
+    let token = app
+        .store("config.json")
+        .ok()
+        .and_then(|s| s.get("github_token"))
+        .and_then(|v| v.as_str().map(String::from))
+        .filter(|t| !t.trim().is_empty());
+
+    let token = match token {
+        Some(t) => t,
+        None => {
+            warn!("submit_feedback: no GitHub token configured");
+            return Err(
+                "No GitHub token configured. Please add your GitHub token in Settings → General."
+                    .to_string(),
+            );
+        }
+    };
+
+    let label = if feedback_type == "bug" {
+        "bug"
+    } else {
+        "enhancement"
+    };
+
+    let body_text = format!("**Type:** {}\n\n{}", feedback_type, description);
+
+    let client = reqwest::Client::new();
+    let payload = serde_json::json!({
+        "title": title,
+        "body": body_text,
+        "labels": [label, "user-feedback"]
+    });
+
+    let resp = client
+        .post("https://api.github.com/repos/huywang/voice-typing/issues")
+        .header("Authorization", format!("Bearer {token}"))
+        .header("User-Agent", "voice-typing-app")
+        .header("Accept", "application/vnd.github.v3+json")
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| {
+            warn!("submit_feedback: network error: {e}");
+            format!("Network error: {e}")
+        })?;
+
+    if resp.status().is_success() {
+        let issue: serde_json::Value = resp.json().await.map_err(|e| {
+            error!("submit_feedback: failed to parse API response: {e}");
+            format!("Parse error: {e}")
+        })?;
+        let url = issue["html_url"].as_str().unwrap_or("").to_string();
+        info!("submit_feedback: issue created at {url}");
+        Ok(url)
+    } else {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        warn!("submit_feedback: GitHub API error {status}: {body}");
+        if status.as_u16() == 401 || status.as_u16() == 403 {
+            Err(format!(
+                "GitHub authentication failed ({status}). Check your token has 'repo' or 'public_repo' scope."
+            ))
+        } else {
+            Err(format!("GitHub API error {status}: {body}"))
+        }
+    }
+}
+
+/// Persist the GitHub personal access token to the config store.
+#[tauri::command]
+pub fn set_github_token(app: AppHandle, token: String) -> Result<(), String> {
+    info!("set_github_token: updating token");
+    match app.store("config.json") {
+        Ok(store) => {
+            store.set("github_token", serde_json::json!(token.trim()));
+            if let Err(e) = store.save() {
+                error!("Failed to save github_token: {e}");
+                return Err(format!("Failed to save token: {e}"));
+            }
+            info!("github_token persisted");
+            Ok(())
+        }
+        Err(e) => {
+            error!("Failed to open config store for github_token: {e}");
+            Err(format!("Failed to open config store: {e}"))
+        }
+    }
+}
+
 // ─── Updater ──────────────────────────────────────────────────────────────────
 
 /// Information about an available update returned to the frontend.

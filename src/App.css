@@ -1173,6 +1173,120 @@ button.danger:hover {
   color: var(--system-red);
 }
 
+/* ── Feedback Page ───────────────────────────────────────── */
+
+/* Two-pill type selector */
+.feedback-type-selector {
+  display: flex;
+  background: var(--fill-quaternary);
+  border-radius: var(--radius-md);
+  padding: 2px;
+  gap: 1px;
+  margin-top: 6px;
+}
+
+.feedback-type-btn {
+  flex: 1;
+  height: 22px;
+  background: none;
+  border: none;
+  border-radius: calc(var(--radius-md) - 1px);
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-shadow: none;
+}
+
+.feedback-type-btn:hover {
+  color: var(--text-primary);
+  background: transparent;
+  border-color: transparent;
+}
+
+.feedback-type-btn.active {
+  color: var(--text-primary);
+  background: var(--bg-grouped);
+  box-shadow: var(--shadow-sm);
+  font-weight: 500;
+}
+
+/* Textarea for description */
+.feedback-textarea {
+  width: 100%;
+  min-height: 120px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  border: 0.5px solid var(--separator-opaque);
+  font-size: 13px;
+  font-family: inherit;
+  line-height: 1.5;
+  box-sizing: border-box;
+  outline: none;
+  resize: vertical;
+  transition: border-color 0.15s ease;
+  background: var(--control-bg);
+  color: var(--text-primary);
+  margin-top: 6px;
+}
+
+.feedback-textarea:focus {
+  border-color: var(--system-blue);
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.2);
+}
+
+.feedback-textarea::placeholder {
+  color: var(--text-tertiary);
+}
+
+.feedback-textarea:disabled {
+  opacity: 0.5;
+}
+
+/* Success state */
+.feedback-success {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 24px 16px 16px;
+  background: var(--bg-grouped);
+  border-radius: var(--radius-lg);
+  text-align: center;
+}
+
+.feedback-success-icon {
+  font-size: 32px;
+  color: var(--system-green);
+  margin: 0;
+  font-weight: 600;
+}
+
+.feedback-success-title {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.feedback-success-desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.feedback-issue-link {
+  font-size: 13px;
+  color: var(--system-blue);
+  text-decoration: none;
+}
+
+.feedback-issue-link:hover {
+  text-decoration: underline;
+}
+
 /* ── Scrollbar styling ───────────────────────────────────── */
 .tab-panel::-webkit-scrollbar {
   width: 6px;
