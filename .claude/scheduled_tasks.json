@@ -1,0 +1,11 @@
+{
+  "tasks": [
+    {
+      "id": "003873f8",
+      "cron": "3 0 * * *",
+      "prompt": "Trigger a nightly release build for voice-typing. Steps:\n1. cd /Users/boyao/workspace/my/voice_input\n2. Get current version from src-tauri/tauri.conf.json\n3. Create a nightly tag: v{version}-nightly.{YYYYMMDD}\n4. Push the tag to trigger the Release workflow\n5. Wait for build to complete, then publish the release\nRun: date_str=$(date +%Y%m%d) && version=$(grep '\"version\"' src-tauri/tauri.conf.json | head -1 | sed 's/.*\"\\([0-9.]*\\)\".*/\\1/') && tag=\"v${version}-nightly.${date_str}\" && cd /Users/boyao/workspace/my/voice_input && git tag -a \"$tag\" -m \"Nightly build $date_str\" && git push origin \"$tag\"",
+      "createdAt": 1778555999913,
+      "recurring": true
+    }
+  ]
+}

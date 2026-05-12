@@ -20,6 +20,59 @@ use tauri::{AppHandle, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tauri_plugin_store::StoreExt;
 
+/// Install a process-wide panic hook that writes a structured crash report to
+/// `<app_data_dir>/crash.log` before the process terminates.
+///
+/// Must be called **before** the Tauri builder runs so that any panics that
+/// occur during setup are also captured.
+fn setup_crash_handler(app_data_dir: &std::path::Path) {
+    let crash_log_path = app_data_dir.join("crash.log");
+
+    std::panic::set_hook(Box::new(move |panic_info| {
+        let timestamp = Utc::now().to_rfc3339();
+
+        let location = panic_info
+            .location()
+            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+            .unwrap_or_else(|| "unknown".to_string());
+
+        let message = if let Some(s) = panic_info.payload().downcast_ref::<&str>() {
+            s.to_string()
+        } else if let Some(s) = panic_info.payload().downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "Unknown panic payload".to_string()
+        };
+
+        let crash_report = format!(
+            "=== CRASH REPORT ===\nTimestamp: {}\nLocation: {}\nMessage: {}\nVersion: {}\nOS: {} {}\n\n",
+            timestamp,
+            location,
+            message,
+            env!("CARGO_PKG_VERSION"),
+            std::env::consts::OS,
+            std::env::consts::ARCH,
+        );
+
+        // Append to crash log so multiple consecutive crashes are all captured.
+        let write_result = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&crash_log_path)
+            .and_then(|mut f| {
+                use std::io::Write;
+                f.write_all(crash_report.as_bytes())
+            });
+
+        if let Err(e) = write_result {
+            eprintln!("CRASH HANDLER: failed to write crash log: {e}");
+        }
+
+        // Always mirror to stderr so it shows up in system logs / console.
+        eprintln!("{crash_report}");
+    }));
+}
+
 
 /// Raise the floating-bar NSWindow to `NSStatusWindowLevel` (25) on macOS.
 ///
@@ -445,6 +498,14 @@ pub fn run() {
 
     info!("Voice Typing starting up");
 
+    // Install a temporary panic hook that writes to the system temp directory.
+    // This captures any panics that occur during Tauri setup before the real
+    // app data directory is known. The hook is replaced in setup() with one
+    // that writes to the canonical app data directory.
+    let early_crash_dir = std::env::temp_dir();
+    setup_crash_handler(&early_crash_dir);
+    info!("Early crash handler installed (temp dir: {})", early_crash_dir.display());
+
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
@@ -505,6 +566,9 @@ pub fn run() {
             commands::get_selected_text,
             commands::submit_feedback,
             commands::set_github_token,
+            commands::check_crash_log,
+            commands::clear_crash_log,
+            commands::submit_crash_report,
         ])
         .setup(|app| {
             // Initialize history database
@@ -514,6 +578,12 @@ pub fn run() {
                 .map_err(|e| format!("Failed to get app data dir: {e}"))?;
             std::fs::create_dir_all(&app_data_dir)
                 .map_err(|e| format!("Failed to create app data dir: {e}"))?;
+
+            // Replace the early (temp-dir) panic hook with one that writes to the
+            // real app data directory so crash logs are found at next startup.
+            setup_crash_handler(&app_data_dir);
+            info!("Crash handler re-installed (app data dir: {})", app_data_dir.display());
+
             let history_db = HistoryDb::init(&app_data_dir)
                 .map_err(|e| format!("Failed to init history DB: {e}"))?;
 

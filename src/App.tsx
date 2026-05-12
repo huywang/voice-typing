@@ -16,6 +16,59 @@ function App() {
   // null = not yet checked; true/false = result from backend
   const [onboardingDone, setOnboardingDone] = useState<boolean | null>(null);
 
+  // Crash report dialog state
+  const [crashLog, setCrashLog] = useState<string | null>(null);
+  const [showCrashDialog, setShowCrashDialog] = useState(false);
+  const [showCrashDetails, setShowCrashDetails] = useState(false);
+  const [crashSubmitting, setCrashSubmitting] = useState(false);
+  const [crashSubmitResult, setCrashSubmitResult] = useState<string | null>(null);
+
+  // Check for crash log once on mount (after onboarding check)
+  useEffect(() => {
+    const checkCrash = async () => {
+      try {
+        const log = await invoke<string | null>("check_crash_log");
+        if (log) {
+          setCrashLog(log);
+          setShowCrashDialog(true);
+        }
+      } catch (e) {
+        console.error("Failed to check crash log:", e);
+      }
+    };
+    checkCrash();
+  }, []);
+
+  const handleCrashSubmit = async () => {
+    if (!crashLog) return;
+    setCrashSubmitting(true);
+    setCrashSubmitResult(null);
+    try {
+      const url = await invoke<string>("submit_crash_report", { crashLog });
+      setCrashSubmitResult(`Submitted: ${url}`);
+      await invoke("clear_crash_log");
+      setTimeout(() => {
+        setShowCrashDialog(false);
+        setCrashLog(null);
+        setCrashSubmitResult(null);
+      }, 2500);
+    } catch (e) {
+      setCrashSubmitResult(`Failed to submit: ${String(e)}`);
+    } finally {
+      setCrashSubmitting(false);
+    }
+  };
+
+  const handleCrashDismiss = async () => {
+    try {
+      await invoke("clear_crash_log");
+    } catch (e) {
+      console.error("Failed to clear crash log:", e);
+    }
+    setShowCrashDialog(false);
+    setCrashLog(null);
+  };
+
   // Check onboarding status once on mount
   useEffect(() => {
     invoke<boolean>("is_onboarding_completed")
@@ -64,6 +117,54 @@ function App() {
 
   return (
     <main className="container">
+      {/* Crash report modal — shown when a previous crash log is detected */}
+      {showCrashDialog && crashLog && (
+        <div className="crash-dialog-overlay">
+          <div className="crash-dialog">
+            <p className="crash-dialog-title">The app crashed last time</p>
+            <p className="crash-dialog-desc">
+              Would you like to send a crash report to help fix the issue?
+            </p>
+
+            <button
+              className="crash-details-toggle"
+              onClick={() => setShowCrashDetails((v) => !v)}
+            >
+              {showCrashDetails ? "Hide details" : "Show details"}
+            </button>
+
+            {showCrashDetails && (
+              <pre className="crash-log-preview">{crashLog}</pre>
+            )}
+
+            {crashSubmitResult && (
+              <p
+                className={
+                  crashSubmitResult.startsWith("Failed")
+                    ? "crash-submit-error"
+                    : "crash-submit-success"
+                }
+              >
+                {crashSubmitResult}
+              </p>
+            )}
+
+            <div className="crash-dialog-actions">
+              <button onClick={handleCrashDismiss} disabled={crashSubmitting}>
+                Dismiss
+              </button>
+              <button
+                className="primary"
+                onClick={handleCrashSubmit}
+                disabled={crashSubmitting}
+              >
+                {crashSubmitting ? "Submitting…" : "Send Report"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <RecordingOverlay />
       <h1>Voice Typing</h1>
 

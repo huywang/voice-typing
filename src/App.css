@@ -1287,6 +1287,107 @@ button.danger:hover {
   text-decoration: underline;
 }
 
+/* ── Crash Report Dialog ─────────────────────────────────── */
+.crash-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  animation: page-enter 0.15s ease-out;
+}
+
+.crash-dialog {
+  background: var(--bg-grouped);
+  border: 0.5px solid var(--separator);
+  border-radius: var(--radius-xl);
+  padding: 20px;
+  width: 320px;
+  max-width: calc(100vw - 40px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: var(--shadow-md);
+}
+
+.crash-dialog-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+  text-align: center;
+}
+
+.crash-dialog-desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 0;
+  text-align: center;
+  line-height: 1.5;
+}
+
+.crash-details-toggle {
+  align-self: center;
+  background: none;
+  border: none;
+  font-size: 11px;
+  color: var(--system-blue);
+  cursor: pointer;
+  height: auto;
+  padding: 2px 4px;
+  box-shadow: none;
+}
+
+.crash-details-toggle:hover {
+  background: none;
+  text-decoration: underline;
+}
+
+.crash-log-preview {
+  background: var(--bg-inset);
+  border: 0.5px solid var(--separator);
+  border-radius: var(--radius-md);
+  padding: 8px 10px;
+  font-size: 10px;
+  font-family: "SF Mono", "Menlo", monospace;
+  color: var(--text-secondary);
+  overflow-y: auto;
+  max-height: 140px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0;
+}
+
+.crash-submit-success {
+  font-size: 11px;
+  color: var(--system-green);
+  text-align: center;
+  margin: 0;
+  font-weight: 500;
+  word-break: break-all;
+}
+
+.crash-submit-error {
+  font-size: 11px;
+  color: var(--system-red);
+  text-align: center;
+  margin: 0;
+  font-weight: 500;
+  word-break: break-all;
+}
+
+.crash-dialog-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.crash-dialog-actions button {
+  flex: 1;
+}
+
 /* ── Scrollbar styling ───────────────────────────────────── */
 .tab-panel::-webkit-scrollbar {
   width: 6px;

@@ -4,7 +4,7 @@ use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use std::time::Instant;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use tauri_plugin_store::StoreExt;
@@ -982,6 +982,54 @@ pub fn set_hotkey(
     }
 
     Ok(())
+}
+
+// ─── Crash Reporting ──────────────────────────────────────────────────────────
+
+/// Check whether a crash log exists from a previous run.
+///
+/// Returns the contents of the crash log if one exists, or `None` if the app
+/// did not crash on the last run.
+#[tauri::command]
+pub fn check_crash_log(app: AppHandle) -> Option<String> {
+    let crash_log = app.path().app_data_dir().ok()?.join("crash.log");
+    let contents = std::fs::read_to_string(&crash_log).ok()?;
+    if contents.trim().is_empty() {
+        None
+    } else {
+        Some(contents)
+    }
+}
+
+/// Delete the crash log file so it is not shown again on subsequent startups.
+#[tauri::command]
+pub fn clear_crash_log(app: AppHandle) -> Result<(), String> {
+    let crash_log = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Cannot find app data dir: {e}"))?
+        .join("crash.log");
+    if crash_log.exists() {
+        std::fs::remove_file(&crash_log)
+            .map_err(|e| format!("Failed to clear crash log: {e}"))?;
+        info!("Crash log cleared");
+    }
+    Ok(())
+}
+
+/// Submit a crash report as a GitHub Issue, then clear the local crash log.
+///
+/// Reuses the same GitHub token / bot-token mechanism as `submit_feedback`.
+#[tauri::command]
+pub async fn submit_crash_report(app: AppHandle, crash_log: String) -> Result<String, String> {
+    info!("submit_crash_report: submitting crash report ({} bytes)", crash_log.len());
+    submit_feedback(
+        app,
+        "bug".to_string(),
+        "Crash Report (auto-generated)".to_string(),
+        format!("```\n{}\n```", crash_log),
+    )
+    .await
 }
 
 // ─── Feedback ─────────────────────────────────────────────────────────────────
